@@ -74,7 +74,7 @@ def main():
 
     # Decode
     start_time = time.time()
-    generated_text = llm(args.prompt, max_token=args.max_new_tokens, temperature=0)
+    generated_text = llm(args.prompt, max_tokens=args.max_new_tokens, temperature=0)
     end_time = time.time()
 
     # Stats
