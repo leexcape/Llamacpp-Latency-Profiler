@@ -59,7 +59,7 @@ def get_hardware_info(device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="~/MyWorkspace/llama.cpp/llama-3.2-1b-q4_k_m.gguf", help="gguf model path")
+    parser.add_argument("--model", type=str, default="/home/lxc/MyWorkspace/llama.cpp/llama-3.2-1b-q4_k_m.gguf", help="gguf model path")
     parser.add_argument("--prompt", type=str, default="Give me some suggestions to advance my python skill.", help="Prompt for generation")
     parser.add_argument("--max_new_tokens", type=int, default=200, help="Number of tokens to generate")
     parser.add_argument("--dtype", type=str, default="float16", help="Data type (e.g., float32, float16, bfloat16)")
