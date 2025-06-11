@@ -6,7 +6,6 @@ import platform
 import subprocess
 import os
 from datetime import datetime
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from llama_cpp import Llama
 
 
