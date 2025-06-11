@@ -59,9 +59,9 @@ def get_hardware_info(device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="HuggingFace model name")
-    parser.add_argument("--prompt", type=str, default="Once upon a time", help="Prompt for generation")
-    parser.add_argument("--max_new_tokens", type=int, default=50, help="Number of tokens to generate")
+    parser.add_argument("--model", type=str, default="~/MyWorkspace/llama.cpp/llama-3.2-1b-q4_k_m.gguf", help="gguf model path")
+    parser.add_argument("--prompt", type=str, default="Give me some suggestions to advance my python skill.", help="Prompt for generation")
+    parser.add_argument("--max_new_tokens", type=int, default=200, help="Number of tokens to generate")
     parser.add_argument("--dtype", type=str, default="float16", help="Data type (e.g., float32, float16, bfloat16)")
     args = parser.parse_args()
 
@@ -69,13 +69,12 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # load model
-    llm = Llama(model_path="~/MyWorkspace/llama.cpp/llama-3.2-1b-q4_k_m.gguf", n_threads=4, n_gpu_layer=0)
+    llm = Llama(model_path=args.model, n_threads=4, n_gpu_layer=0)
     print("Model loaded, ctx=", llm.n_ctx())
 
     # Decode
-    prompt = "Give me some suggestions to advance my python skill."
     start_time = time.time()
-    generated_text = llm(prompt, max_token=200, temperature=0)
+    generated_text = llm(args.prompt, max_token=args.max_new_tokens, temperature=0)
     end_time = time.time()
 
     # Stats
