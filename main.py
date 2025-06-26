@@ -69,7 +69,14 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # load model
-    llm = Llama(model_path=args.model, n_threads=4, n_gpu_layer=0)
+    # llm = Llama(model_path=args.model, n_threads=4, n_gpu_layer=0)
+    llm = Llama.from_pretrained(
+        repo_id="hugging-quants/Llama-3.2-1B-Instruct-Q4_K_M-GGUF",
+        filename="llama-3.2-1b-instruct-q4_k_m.gguf",
+        n_gpu_layers=-1,  # try increasing based on GPU VRAM
+        # n_ctx=512,        # context length
+        # n_threads=4       # adjust to your CPU
+    )
     print("Model loaded, ctx=", llm.n_ctx())
 
     # Decode
