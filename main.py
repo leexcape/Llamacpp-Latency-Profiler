@@ -7,7 +7,9 @@ import subprocess
 import os
 from datetime import datetime
 from llama_cpp import Llama
+import numpy as np
 
+n_runs = 30
 
 def get_hardware_info(device):
     info = {
@@ -72,25 +74,31 @@ def main():
     llm = Llama(model_path=args.model, n_threads=4, n_gpu_layer=0)
     print("Model loaded, ctx=", llm.n_ctx())
 
-    # Decode
-    start_time = time.time()
-    generated_text = llm(args.prompt, max_tokens=args.max_new_tokens, temperature=0)
-    end_time = time.time()
+    generated_text_rec = []
+    elapsed_rec = []
+    tokens_per_sec_rec = []
+    for i in range(n_runs):
+        # Decode
+        start_time = time.time()
+        generated_text = llm(args.prompt, max_tokens=args.max_new_tokens, temperature=0)
+        generated_text_rec.append(generated_text)
+        end_time = time.time()
 
-    # Stats
-    elapsed = end_time - start_time
-    tokens_generated = generated_text["usage"]["completion_tokens"]
-    tokens_per_sec = tokens_generated / elapsed
+        # Stats
+        elapsed_rec.append(end_time - start_time)
+        tokens_generated = generated_text["usage"]["completion_tokens"]
+        tokens_per_sec_rec.append(tokens_generated / (end_time - start_time))
+        print(f"{i + 1}-th Inference done, average tokens per second is:{tokens_generated / (end_time - start_time)}")
 
     # Collect metadata
     results = {
         "timestamp": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "model_name": args.model,
         "prompt": args.prompt,
-        "generated_text": generated_text,
+        "generated_text": generated_text_rec,
         "response_length": args.max_new_tokens,
-        "elapsed_time_sec": elapsed,
-        "tokens_per_second": tokens_per_sec,
+        "elapsed_time_sec": elapsed_rec,
+        "tokens_per_second": tokens_per_sec_rec,
         "dtype": args.dtype,
         "device_info": get_hardware_info(device)
     }
@@ -101,8 +109,7 @@ def main():
         json.dump(results, f, indent=4)
 
     print(f"\nBenchmark saved to {out_name}")
-    print(f"\nGenerated Text:\n{'='*60}\n{generated_text}\n{'='*60}")
-    print(f"The average generation speed: {tokens_generated / elapsed} tokens/second")
+    print(f"The average generation speed: {np.array(list(tokens_per_sec_rec)).mean()} tokens/second")
 
 
 if __name__ == "__main__":
