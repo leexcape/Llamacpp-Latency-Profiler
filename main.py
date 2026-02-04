@@ -12,10 +12,29 @@ import json
 import platform
 import os
 import sys
+import glob
 from datetime import datetime, timezone
 from pathlib import Path
 
 from llama_cpp import Llama
+
+
+def discover_models(args):
+    """Discover model(s) to benchmark based on arguments."""
+    if args.model_dir:
+        # Find all GGUF files in the directory
+        pattern = os.path.join(args.model_dir, "*.gguf")
+        models = sorted(glob.glob(pattern))
+        if not models:
+            print(f"Error: No .gguf files found in: {args.model_dir}")
+            sys.exit(1)
+        return models
+    else:
+        # Single model mode
+        if not os.path.exists(args.model):
+            print(f"Error: Model file not found: {args.model}")
+            sys.exit(1)
+        return [args.model]
 
 
 def get_hardware_info():
@@ -71,35 +90,20 @@ def calculate_statistics(values):
     }
 
 
-def run_benchmark(args):
-    """Run the benchmark with minimal overhead for accurate latency measurement."""
-    script_dir = Path(__file__).parent.resolve()
-
-    # Validate model path
-    if not os.path.exists(args.model):
-        print(f"Error: Model file not found: {args.model}")
-        sys.exit(1)
-
-    # Prepare output directory
-    output_dir = Path(args.output_dir)
-    if not output_dir.is_absolute():
-        output_dir = script_dir / output_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Get timestamps (once, before benchmark)
+def benchmark_single_model(model_path, args, output_dir, device_info, model_index, total_models):
+    """Benchmark a single model and return results."""
+    # Get timestamps
     start_datetime = datetime.now(timezone.utc)
     timestamp_str = start_datetime.strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Collect system info once before benchmark
-    device_info = get_hardware_info()
-    model_info = get_model_info(args.model)
+    model_info = get_model_info(model_path)
 
     # Load model
-    print(f"Loading model: {model_info['filename']}")
+    print(f"\n[{model_index}/{total_models}] Loading model: {model_info['filename']}")
 
     load_start = time.time()
     llm = Llama(
-        model_path=args.model,
+        model_path=model_path,
         n_threads=args.threads,
         n_gpu_layers=args.n_gpu_layers,
         n_ctx=args.ctx_size,
@@ -107,16 +111,16 @@ def run_benchmark(args):
     )
     load_time = time.time() - load_start
 
-    print(f"Model loaded in {load_time:.2f}s")
+    print(f"[{model_index}/{total_models}] Model loaded in {load_time:.2f}s")
 
     # Warmup runs (silent, minimal overhead)
     if args.warmup > 0:
-        print(f"Warmup ({args.warmup} runs)...")
+        print(f"[{model_index}/{total_models}] Warmup ({args.warmup} runs)...")
         for _ in range(args.warmup):
             llm(args.prompt, max_tokens=min(args.max_tokens, 50), temperature=0)
 
     # Benchmark runs - MINIMAL OVERHEAD LOOP
-    print(f"Benchmarking ({args.runs} runs)...")
+    print(f"[{model_index}/{total_models}] Benchmarking ({args.runs} runs)...")
 
     elapsed_times = []
     tokens_per_sec_list = []
@@ -174,7 +178,7 @@ def run_benchmark(args):
     }
 
     # Save results
-    model_name = Path(args.model).stem
+    model_name = Path(model_path).stem
     out_filename = f"benchmark_{model_name}_{timestamp_str}.json"
     out_path = output_dir / out_filename
 
@@ -182,11 +186,55 @@ def run_benchmark(args):
         json.dump(results, f, indent=2)
 
     # Print summary
-    print(f"\nResults: {stats['tokens_per_second']['mean']:.2f} tok/s avg "
+    print(f"[{model_index}/{total_models}] Results: {stats['tokens_per_second']['mean']:.2f} tok/s avg "
           f"(min: {stats['tokens_per_second']['min']:.2f}, max: {stats['tokens_per_second']['max']:.2f})")
-    print(f"Saved: {out_path}")
+    print(f"[{model_index}/{total_models}] Saved: {out_path}")
+
+    # Clean up to free memory before loading next model
+    del llm
 
     return results
+
+
+def run_benchmark(args):
+    """Run the benchmark with minimal overhead for accurate latency measurement."""
+    script_dir = Path(__file__).parent.resolve()
+
+    # Discover models to benchmark
+    model_paths = discover_models(args)
+    total_models = len(model_paths)
+
+    print(f"Discovered {total_models} model(s) to benchmark")
+    for i, path in enumerate(model_paths, 1):
+        print(f"  {i}. {os.path.basename(path)}")
+
+    # Prepare output directory
+    output_dir = Path(args.output_dir)
+    if not output_dir.is_absolute():
+        output_dir = script_dir / output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Collect system info once before benchmark
+    device_info = get_hardware_info()
+
+    # Benchmark each model
+    all_results = []
+    for i, model_path in enumerate(model_paths, 1):
+        result = benchmark_single_model(
+            model_path, args, output_dir, device_info, i, total_models
+        )
+        all_results.append(result)
+
+    # Print final summary
+    print(f"\n{'='*60}")
+    print(f"Completed benchmarking {total_models} model(s)")
+    print(f"{'='*60}")
+    for result in all_results:
+        model_name = result["model_info"]["filename"]
+        tps = result["statistics"]["tokens_per_second"]["mean"]
+        print(f"  {model_name}: {tps:.2f} tok/s")
+
+    return all_results
 
 
 def main():
@@ -197,13 +245,16 @@ def main():
 Examples:
   %(prog)s --model model.gguf
   %(prog)s --model model.gguf --runs 10 --warmup 2
-  %(prog)s --model model.gguf --threads 4
+  %(prog)s --model-dir /path/to/models --threads 4
         """
     )
 
-    # Model and inference options
-    parser.add_argument("--model", "-m", type=str, required=True,
-                        help="Path to GGUF model file")
+    # Model selection (mutually exclusive: single model or directory)
+    model_group = parser.add_mutually_exclusive_group(required=True)
+    model_group.add_argument("--model", "-m", type=str,
+                             help="Path to a single GGUF model file")
+    model_group.add_argument("--model-dir", "-d", type=str,
+                             help="Path to directory containing GGUF models (benchmarks all)")
     parser.add_argument("--prompt", "-p", type=str,
                         default="Explain the concept of machine learning in simple terms.",
                         help="Prompt for text generation")
