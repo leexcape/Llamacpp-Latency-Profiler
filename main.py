@@ -18,6 +18,15 @@ from pathlib import Path
 
 from llama_cpp import Llama
 
+# Import power monitor (optional - only used if available and enabled)
+try:
+    from Rpi_power_monitor import PowerMonitor, PowerSummary
+    POWER_MONITOR_AVAILABLE = True
+except ImportError:
+    POWER_MONITOR_AVAILABLE = False
+    PowerMonitor = None
+    PowerSummary = None
+
 
 def discover_models(args):
     """Discover model(s) to benchmark based on arguments."""
@@ -119,6 +128,18 @@ def benchmark_single_model(model_path, args, output_dir, device_info, model_inde
         for _ in range(args.warmup):
             llm(args.prompt, max_tokens=min(args.max_tokens, 50), temperature=0)
 
+    # Initialize power monitoring if enabled
+    power_monitor = None
+    power_summary = None
+    if args.power_monitor and POWER_MONITOR_AVAILABLE:
+        power_monitor = PowerMonitor(
+            interval=args.power_interval,
+            apply_correction=True
+        )
+        power_monitor.start()
+    elif args.power_monitor and not POWER_MONITOR_AVAILABLE:
+        print(f"[{model_index}/{total_models}] Warning: Power monitoring requested but Rpi_power_monitor not available")
+
     # Benchmark runs - MINIMAL OVERHEAD LOOP
     print(f"[{model_index}/{total_models}] Benchmarking ({args.runs} runs)...")
 
@@ -144,6 +165,11 @@ def benchmark_single_model(model_path, args, output_dir, device_info, model_inde
 
     benchmark_duration = time.time() - benchmark_start
 
+    # Stop power monitoring and get summary
+    if power_monitor:
+        power_monitor.stop()
+        power_summary = power_monitor.summary(print_output=False)
+
     # Calculate statistics (after all runs complete)
     stats = {
         "elapsed_time_sec": calculate_statistics(elapsed_times),
@@ -155,7 +181,7 @@ def benchmark_single_model(model_path, args, output_dir, device_info, model_inde
     results = {
         "meta": {
             "timestamp": timestamp_str,
-            "profiler_version": "2.1.0-minimal",
+            "profiler_version": "2.2.0-power",
         },
         "config": {
             "prompt": args.prompt,
@@ -165,6 +191,7 @@ def benchmark_single_model(model_path, args, output_dir, device_info, model_inde
             "ctx_size": args.ctx_size,
             "warmup_runs": args.warmup,
             "benchmark_runs": args.runs,
+            "power_monitoring": args.power_monitor if hasattr(args, 'power_monitor') else False,
         },
         "model_info": model_info,
         "device_info": device_info,
@@ -177,6 +204,22 @@ def benchmark_single_model(model_path, args, output_dir, device_info, model_inde
                  for t, tps in zip(elapsed_times, tokens_per_sec_list)],
     }
 
+    # Add power statistics if monitoring was enabled
+    if power_summary:
+        results["power"] = {
+            "method": power_summary.method,
+            "samples": power_summary.samples,
+            "avg_power_w": power_summary.avg_power_w,
+            "min_power_w": power_summary.min_power_w,
+            "max_power_w": power_summary.max_power_w,
+            "std_power_w": power_summary.std_power_w,
+            "total_energy_j": power_summary.total_energy_j,
+            "total_energy_wh": power_summary.total_energy_wh,
+            "avg_temp_c": power_summary.avg_temp_c,
+            "max_temp_c": power_summary.max_temp_c,
+            "avg_cpu_percent": power_summary.avg_cpu_percent,
+        }
+
     # Save results
     model_name = Path(model_path).stem
     out_filename = f"benchmark_{model_name}_{timestamp_str}.json"
@@ -188,6 +231,10 @@ def benchmark_single_model(model_path, args, output_dir, device_info, model_inde
     # Print summary
     print(f"[{model_index}/{total_models}] Results: {stats['tokens_per_second']['mean']:.2f} tok/s avg "
           f"(min: {stats['tokens_per_second']['min']:.2f}, max: {stats['tokens_per_second']['max']:.2f})")
+    if power_summary:
+        print(f"[{model_index}/{total_models}] Power: {power_summary.avg_power_w:.2f}W avg "
+              f"(min: {power_summary.min_power_w:.2f}W, max: {power_summary.max_power_w:.2f}W) | "
+              f"Energy: {power_summary.total_energy_j:.1f}J")
     print(f"[{model_index}/{total_models}] Saved: {out_path}")
 
     # Clean up to free memory before loading next model
@@ -232,7 +279,10 @@ def run_benchmark(args):
     for result in all_results:
         model_name = result["model_info"]["filename"]
         tps = result["statistics"]["tokens_per_second"]["mean"]
-        print(f"  {model_name}: {tps:.2f} tok/s")
+        power_info = ""
+        if "power" in result:
+            power_info = f" | {result['power']['avg_power_w']:.2f}W avg"
+        print(f"  {model_name}: {tps:.2f} tok/s{power_info}")
 
     return all_results
 
@@ -246,6 +296,7 @@ Examples:
   %(prog)s --model model.gguf
   %(prog)s --model model.gguf --runs 10 --warmup 2
   %(prog)s --model-dir /path/to/models --threads 4
+  %(prog)s --model model.gguf --power-monitor --power-interval 0.5
         """
     )
 
@@ -274,6 +325,12 @@ Examples:
                         help="Number of benchmark runs (default: 10)")
     parser.add_argument("--warmup", "-w", type=int, default=1,
                         help="Number of warmup runs before benchmark (default: 1)")
+
+    # Power monitoring options
+    parser.add_argument("--power-monitor", "--power", action="store_true",
+                        help="Enable power monitoring during benchmark (Raspberry Pi only)")
+    parser.add_argument("--power-interval", type=float, default=0.5,
+                        help="Power sampling interval in seconds (default: 0.5)")
 
     # Output options
     parser.add_argument("--output-dir", "-o", type=str, default="results",
