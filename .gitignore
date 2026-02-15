@@ -1,6 +1,4 @@
 # Outputs
-results/*
-!results/.gitkeep
 slurm_logs/*
 !slurm_logs/.gitkeep
 
