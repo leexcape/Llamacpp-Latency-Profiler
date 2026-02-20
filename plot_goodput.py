@@ -7,6 +7,14 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 # -----------------------------
+# Figure size configuration (width, height in inches)
+# Adjust these to control aspect ratio for paper layout.
+# -----------------------------
+FIG_DPI          = 300
+FIG_SCATTER      = (7.5, 3.2)    # scatter / tradeoff plots
+FIG_BAR          = (11.0, 3.6)   # grouped bar charts
+
+# -----------------------------
 # Output directory with timestamp
 # -----------------------------
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -18,69 +26,69 @@ os.makedirs(OUT_DIR, exist_ok=True)
 # -----------------------------
 ACC = {
     # Target: Meta-Llama-3.1-70B
-    ("llama_target_70b", "llama-3.2-1b"): 0.5038,
-    ("llama_target_70b", "llama-3.2-3b"): 0.5691,
-    ("llama_target_70b", "llama-3.1-8b"): 0.6488,
+    ("llama_target_70b", "1b"): 0.5038,
+    ("llama_target_70b", "3b"): 0.5691,
+    ("llama_target_70b", "8b"): 0.6488,
 
     # Target: Qwen3-32B
-    ("qwen_target_32b", "qwen3-0.6b"): 0.3826,
-    ("qwen_target_32b", "qwen3-1.7b"): 0.4494,
-    ("qwen_target_32b", "qwen3-4b"): 0.4705,
-    ("qwen_target_32b", "qwen3-8b"): 0.5357,
+    ("qwen_target_32b", "0.6b"): 0.3826,
+    ("qwen_target_32b", "1.7b"): 0.4494,
+    ("qwen_target_32b", "4b"):   0.4705,
+    ("qwen_target_32b", "8b"):   0.5357,
 }
 
 # Draft tok/s (RPi4B)
 SPEED_RPI4 = {
-    ("llama_target_70b", "llama-3.2-1b", "q4_k_m", "instruct"): 4.14,
-    ("llama_target_70b", "llama-3.2-1b", "q4_k_m", "base"):     4.18,
-    ("llama_target_70b", "llama-3.2-3b", "q4_k_m", "instruct"): 1.68,
-    ("llama_target_70b", "llama-3.2-3b", "q8_0",   "instruct"): 1.04,
-    ("llama_target_70b", "llama-3.1-8b", "q4_k_m", "instruct"): 0.72,
+    ("llama_target_70b", "1b", "q4_k_m", "inst"): 4.14,
+    ("llama_target_70b", "1b", "q4_k_m", "base"):     4.18,
+    ("llama_target_70b", "3b", "q4_k_m", "inst"): 1.68,
+    ("llama_target_70b", "3b", "q8_0",   "inst"): 1.04,
+    ("llama_target_70b", "8b", "q4_k_m", "inst"): 0.72,
 
-    ("qwen_target_32b",  "qwen3-0.6b",   "q4_k_m", "base"):     7.84,
-    ("qwen_target_32b",  "qwen3-0.6b",   "q8_0",   "base"):     4.92,
-    ("qwen_target_32b",  "qwen3-1.7b",   "q4_k_m", "base"):     3.02,
-    ("qwen_target_32b",  "qwen3-1.7b",   "q8_0",   "base"):     1.89,
-    ("qwen_target_32b",  "qwen3-4b",     "q4_k_m", "base"):     1.34,
-    ("qwen_target_32b",  "qwen3-4b",     "q8_0",   "base"):     0.83,
-    ("qwen_target_32b",  "qwen3-8b",     "q4_k_m", "base"):     0.72,
-    ("qwen_target_32b",  "qwen3-8b",     "q6_k",   "base"):     0.55,
+    ("qwen_target_32b",  "0.6b",   "q4_k_m", "base"):     7.84,
+    ("qwen_target_32b",  "0.6b",   "q8_0",   "base"):     4.92,
+    ("qwen_target_32b",  "1.7b",   "q4_k_m", "base"):     3.02,
+    ("qwen_target_32b",  "1.7b",   "q8_0",   "base"):     1.89,
+    ("qwen_target_32b",  "4b",     "q4_k_m", "base"):     1.34,
+    ("qwen_target_32b",  "4b",     "q8_0",   "base"):     0.83,
+    ("qwen_target_32b",  "8b",     "q4_k_m", "base"):     0.72,
+    ("qwen_target_32b",  "8b",     "q6_k",   "base"):     0.55,
 }
 
 # Draft tok/s (RPi5)
 SPEED_RPI5 = {
-    ("llama_target_70b", "llama-3.2-1b", "q4_k_m", "instruct"): 14.47,
-    ("llama_target_70b", "llama-3.2-1b", "q4_k_m", "base"):     12.86,
-    ("llama_target_70b", "llama-3.2-3b", "q4_k_m", "instruct"): 4.68,
-    ("llama_target_70b", "llama-3.2-3b", "q8_0",   "instruct"): 2.37,
-    ("llama_target_70b", "llama-3.1-8b", "q4_k_m", "instruct"): 1.77,
+    ("llama_target_70b", "1b", "q4_k_m", "inst"): 14.47,
+    ("llama_target_70b", "1b", "q4_k_m", "base"):     12.86,
+    ("llama_target_70b", "3b", "q4_k_m", "inst"): 4.68,
+    ("llama_target_70b", "3b", "q8_0",   "inst"): 2.37,
+    ("llama_target_70b", "8b", "q4_k_m", "inst"): 1.77,
 
-    ("qwen_target_32b",  "qwen3-0.6b",   "q4_k_m", "base"):     18.18,
-    ("qwen_target_32b",  "qwen3-0.6b",   "q8_0",   "base"):     10.38,
-    ("qwen_target_32b",  "qwen3-1.7b",   "q4_k_m", "base"):     7.15,
-    ("qwen_target_32b",  "qwen3-1.7b",   "q8_0",   "base"):     4.01,
-    ("qwen_target_32b",  "qwen3-4b",     "q4_k_m", "base"):     3.11,
-    ("qwen_target_32b",  "qwen3-4b",     "q8_0",   "base"):     1.93,
-    ("qwen_target_32b",  "qwen3-8b",     "q4_k_m", "base"):     1.78,
-    ("qwen_target_32b",  "qwen3-8b",     "q6_k",   "base"):     1.68,
+    ("qwen_target_32b",  "0.6b",   "q4_k_m", "base"):     18.18,
+    ("qwen_target_32b",  "0.6b",   "q8_0",   "base"):     10.38,
+    ("qwen_target_32b",  "1.7b",   "q4_k_m", "base"):     7.15,
+    ("qwen_target_32b",  "1.7b",   "q8_0",   "base"):     4.01,
+    ("qwen_target_32b",  "4b",     "q4_k_m", "base"):     3.11,
+    ("qwen_target_32b",  "4b",     "q8_0",   "base"):     1.93,
+    ("qwen_target_32b",  "8b",     "q4_k_m", "base"):     1.78,
+    ("qwen_target_32b",  "8b",     "q6_k",   "base"):     1.68,
 }
 
 # Draft tok/s (JETSON)
 SPEED_JETSON = {
-    ("llama_target_70b", "llama-3.2-1b", "q4_k_m", "instruct"): 93.14,
-    ("llama_target_70b", "llama-3.2-1b", "q4_k_m", "base"):     92.94,
-    ("llama_target_70b", "llama-3.2-3b", "q4_k_m", "instruct"): 42.52,
-    ("llama_target_70b", "llama-3.2-3b", "q8_0",   "instruct"): 31.36,
-    ("llama_target_70b", "llama-3.1-8b", "q4_k_m", "instruct"): 25.07,
+    ("llama_target_70b", "1b", "q4_k_m", "inst"): 93.14,
+    ("llama_target_70b", "1b", "q4_k_m", "base"):     92.94,
+    ("llama_target_70b", "3b", "q4_k_m", "inst"): 42.52,
+    ("llama_target_70b", "3b", "q8_0",   "inst"): 31.36,
+    ("llama_target_70b", "8b", "q4_k_m", "inst"): 25.07,
 
-    ("qwen_target_32b",  "qwen3-0.6b",   "q4_k_m", "base"):     98.63,
-    ("qwen_target_32b",  "qwen3-0.6b",   "q8_0",   "base"):     80.21,
-    ("qwen_target_32b",  "qwen3-1.7b",   "q4_k_m", "base"):     65.31,
-    ("qwen_target_32b",  "qwen3-1.7b",   "q8_0",   "base"):     46.64,
-    ("qwen_target_32b",  "qwen3-4b",     "q4_k_m", "base"):     33.70,
-    ("qwen_target_32b",  "qwen3-4b",     "q8_0",   "base"):     23.02,
-    ("qwen_target_32b",  "qwen3-8b",     "q4_k_m", "base"):     24.03,
-    ("qwen_target_32b",  "qwen3-8b",     "q6_k",   "base"):     18.55,
+    ("qwen_target_32b",  "0.6b",   "q4_k_m", "base"):     98.63,
+    ("qwen_target_32b",  "0.6b",   "q8_0",   "base"):     80.21,
+    ("qwen_target_32b",  "1.7b",   "q4_k_m", "base"):     65.31,
+    ("qwen_target_32b",  "1.7b",   "q8_0",   "base"):     46.64,
+    ("qwen_target_32b",  "4b",     "q4_k_m", "base"):     33.70,
+    ("qwen_target_32b",  "4b",     "q8_0",   "base"):     23.02,
+    ("qwen_target_32b",  "8b",     "q4_k_m", "base"):     24.03,
+    ("qwen_target_32b",  "8b",     "q6_k",   "base"):     18.55,
 }
 # -----------------------------
 # 2) Build dataframe
@@ -140,12 +148,12 @@ def _paper_rc():
         "font.serif":        ["Times New Roman", "DejaVu Serif", "serif"],
         "mathtext.fontset":  "stix",
         "font.size":         10,
-        "axes.labelsize":    11,
-        "axes.titlesize":    12,
+        "axes.labelsize":    14,
+        "axes.titlesize":    15,
         "axes.titleweight":  "bold",
-        "legend.fontsize":   9,
-        "xtick.labelsize":   9,
-        "ytick.labelsize":   9,
+        "legend.fontsize":   10,
+        "xtick.labelsize":   12,
+        "ytick.labelsize":   12,
         "xtick.direction":   "in",
         "ytick.direction":   "in",
         "xtick.major.width": 0.8,
@@ -164,7 +172,7 @@ def _paper_rc():
 def plot_tradeoff(df_sub: pd.DataFrame, title: str, out_prefix: str):
     _paper_rc()
 
-    fig, ax = plt.subplots(figsize=(7.0, 4.5), dpi=300)
+    fig, ax = plt.subplots(figsize=FIG_SCATTER, dpi=FIG_DPI)
 
     # --- iso-goodput contour curves: y = G / x ---
     x = np.linspace(0.25, 0.70, 300)
@@ -177,7 +185,7 @@ def plot_tradeoff(df_sub: pd.DataFrame, title: str, out_prefix: str):
         xr = 0.68
         yr = G / xr
         if yr < y_max:
-            ax.text(xr + 0.005, yr, f"$G$={G}", fontsize=7, color="#666666",
+            ax.text(xr + 0.005, yr, f"$G$={G}", fontsize=8, color="#666666",
                     va="bottom", ha="left")
 
     # --- scatter by device ---
@@ -208,7 +216,7 @@ def plot_tradeoff(df_sub: pd.DataFrame, title: str, out_prefix: str):
             xy=(best["accept"], best["draft_tps"]),
             xytext=(12, 10),
             textcoords="offset points",
-            fontsize=7.5,
+            fontsize=8,
             color=DEVICE_COLORS[dev],
             arrowprops=dict(arrowstyle="-|>", color=DEVICE_COLORS[dev],
                             lw=0.9, shrinkA=0, shrinkB=3),
@@ -257,7 +265,7 @@ def plot_grouped_bar(df_sub: pd.DataFrame, title: str, out_prefix: str):
     width = 0.75 / n_devices
     x = np.arange(n_variants)
 
-    fig, ax = plt.subplots(figsize=(11.0, 4.8), dpi=300)
+    fig, ax = plt.subplots(figsize=FIG_BAR, dpi=FIG_DPI)
 
     for i, dev in enumerate(ordered_cols):
         offset = (i - (n_devices - 1) / 2) * width
@@ -274,7 +282,7 @@ def plot_grouped_bar(df_sub: pd.DataFrame, title: str, out_prefix: str):
             zorder=3,
         )
 
-    ax.set_ylabel("Goodput Proxy  (tok/s)  =  draft_tps $\\times$ acceptance")
+    ax.set_ylabel("Goodput Proxy  (tok/s)")
     ax.set_title(title, pad=10)
     ax.set_xticks(x)
     ax.set_xticklabels(pivot.index, rotation=38, ha="right")

@@ -1,0 +1,40 @@
+target,device,model,quant,flavor,draft_tps,accept,goodput_proxy,variant
+llama_target_70b,RPi 4B,1b,q4_k_m,inst,4.14,0.5038,2.085732,1b-inst-q4_k_m
+llama_target_70b,RPi 4B,1b,q4_k_m,base,4.18,0.5038,2.105884,1b-base-q4_k_m
+llama_target_70b,RPi 4B,3b,q4_k_m,inst,1.68,0.5691,0.956088,3b-inst-q4_k_m
+llama_target_70b,RPi 4B,3b,q8_0,inst,1.04,0.5691,0.5918640000000001,3b-inst-q8_0
+llama_target_70b,RPi 4B,8b,q4_k_m,inst,0.72,0.6488,0.467136,8b-inst-q4_k_m
+qwen_target_32b,RPi 4B,0.6b,q4_k_m,base,7.84,0.3826,2.999584,0.6b-base-q4_k_m
+qwen_target_32b,RPi 4B,0.6b,q8_0,base,4.92,0.3826,1.8823919999999998,0.6b-base-q8_0
+qwen_target_32b,RPi 4B,1.7b,q4_k_m,base,3.02,0.4494,1.357188,1.7b-base-q4_k_m
+qwen_target_32b,RPi 4B,1.7b,q8_0,base,1.89,0.4494,0.849366,1.7b-base-q8_0
+qwen_target_32b,RPi 4B,4b,q4_k_m,base,1.34,0.4705,0.63047,4b-base-q4_k_m
+qwen_target_32b,RPi 4B,4b,q8_0,base,0.83,0.4705,0.39051499999999995,4b-base-q8_0
+qwen_target_32b,RPi 4B,8b,q4_k_m,base,0.72,0.5357,0.38570399999999994,8b-base-q4_k_m
+qwen_target_32b,RPi 4B,8b,q6_k,base,0.55,0.5357,0.294635,8b-base-q6_k
+llama_target_70b,RPi 5,1b,q4_k_m,inst,14.47,0.5038,7.289986000000001,1b-inst-q4_k_m
+llama_target_70b,RPi 5,1b,q4_k_m,base,12.86,0.5038,6.478868,1b-base-q4_k_m
+llama_target_70b,RPi 5,3b,q4_k_m,inst,4.68,0.5691,2.663388,3b-inst-q4_k_m
+llama_target_70b,RPi 5,3b,q8_0,inst,2.37,0.5691,1.3487670000000003,3b-inst-q8_0
+llama_target_70b,RPi 5,8b,q4_k_m,inst,1.77,0.6488,1.148376,8b-inst-q4_k_m
+qwen_target_32b,RPi 5,0.6b,q4_k_m,base,18.18,0.3826,6.955668,0.6b-base-q4_k_m
+qwen_target_32b,RPi 5,0.6b,q8_0,base,10.38,0.3826,3.971388,0.6b-base-q8_0
+qwen_target_32b,RPi 5,1.7b,q4_k_m,base,7.15,0.4494,3.21321,1.7b-base-q4_k_m
+qwen_target_32b,RPi 5,1.7b,q8_0,base,4.01,0.4494,1.802094,1.7b-base-q8_0
+qwen_target_32b,RPi 5,4b,q4_k_m,base,3.11,0.4705,1.4632549999999998,4b-base-q4_k_m
+qwen_target_32b,RPi 5,4b,q8_0,base,1.93,0.4705,0.9080649999999999,4b-base-q8_0
+qwen_target_32b,RPi 5,8b,q4_k_m,base,1.78,0.5357,0.9535459999999999,8b-base-q4_k_m
+qwen_target_32b,RPi 5,8b,q6_k,base,1.68,0.5357,0.8999759999999999,8b-base-q6_k
+llama_target_70b,Jetson AGX Orin,1b,q4_k_m,inst,93.14,0.5038,46.923932,1b-inst-q4_k_m
+llama_target_70b,Jetson AGX Orin,1b,q4_k_m,base,92.94,0.5038,46.823172,1b-base-q4_k_m
+llama_target_70b,Jetson AGX Orin,3b,q4_k_m,inst,42.52,0.5691,24.198132000000005,3b-inst-q4_k_m
+llama_target_70b,Jetson AGX Orin,3b,q8_0,inst,31.36,0.5691,17.846976,3b-inst-q8_0
+llama_target_70b,Jetson AGX Orin,8b,q4_k_m,inst,25.07,0.6488,16.265416000000002,8b-inst-q4_k_m
+qwen_target_32b,Jetson AGX Orin,0.6b,q4_k_m,base,98.63,0.3826,37.735838,0.6b-base-q4_k_m
+qwen_target_32b,Jetson AGX Orin,0.6b,q8_0,base,80.21,0.3826,30.688345999999996,0.6b-base-q8_0
+qwen_target_32b,Jetson AGX Orin,1.7b,q4_k_m,base,65.31,0.4494,29.350314,1.7b-base-q4_k_m
+qwen_target_32b,Jetson AGX Orin,1.7b,q8_0,base,46.64,0.4494,20.960016,1.7b-base-q8_0
+qwen_target_32b,Jetson AGX Orin,4b,q4_k_m,base,33.7,0.4705,15.85585,4b-base-q4_k_m
+qwen_target_32b,Jetson AGX Orin,4b,q8_0,base,23.02,0.4705,10.83091,4b-base-q8_0
+qwen_target_32b,Jetson AGX Orin,8b,q4_k_m,base,24.03,0.5357,12.872871,8b-base-q4_k_m
+qwen_target_32b,Jetson AGX Orin,8b,q6_k,base,18.55,0.5357,9.937235,8b-base-q6_k

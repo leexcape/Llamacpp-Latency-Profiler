@@ -6,6 +6,14 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 # -----------------------------
+# Figure size configuration (width, height in inches)
+# Adjust these to control aspect ratio for paper layout.
+# -----------------------------
+FIG_DPI          = 300
+FIG_SCATTER      = (7.5, 3.2)    # scatter / tradeoff plots
+FIG_BAR          = (11.0, 3.6)   # grouped bar charts
+
+# -----------------------------
 # Output directory with timestamp
 # -----------------------------
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -147,12 +155,12 @@ def _paper_rc():
         "font.serif":         ["Times New Roman", "DejaVu Serif", "serif"],
         "mathtext.fontset":   "stix",
         "font.size":          10,
-        "axes.labelsize":     11,
-        "axes.titlesize":     12,
+        "axes.labelsize":     12,
+        "axes.titlesize":     13,
         "axes.titleweight":   "bold",
-        "legend.fontsize":    9,
-        "xtick.labelsize":    9,
-        "ytick.labelsize":    9,
+        "legend.fontsize":    10,
+        "xtick.labelsize":    10,
+        "ytick.labelsize":    10,
         "xtick.direction":    "in",
         "ytick.direction":    "in",
         "xtick.major.width":  0.8,
@@ -197,7 +205,7 @@ for target, g in df.groupby("target"):
     width = 0.75 / n_devices
     x = np.arange(n_variants)
 
-    fig, ax = plt.subplots(figsize=(11.0, 4.8), dpi=300)
+    fig, ax = plt.subplots(figsize=FIG_BAR, dpi=FIG_DPI)
 
     for i, dev in enumerate(ordered_cols):
         offset = (i - (n_devices - 1) / 2) * width
@@ -210,7 +218,7 @@ for target, g in df.groupby("target"):
             alpha=0.88, zorder=3,
         )
 
-    ax.set_ylabel("Energy per Verified Token  (J/tok)  [lower is better]")
+    ax.set_ylabel("Energy / Verified Token  (J/tok)")
     ax.set_title(
         f"Energy Efficiency Comparison  (Target: {display_name})", pad=10
     )
@@ -242,7 +250,7 @@ for target, g in df.groupby("target"):
     _paper_rc()
     display_name = TARGET_DISPLAY[target]
 
-    fig, ax = plt.subplots(figsize=(7.0, 4.5), dpi=300)
+    fig, ax = plt.subplots(figsize=FIG_SCATTER, dpi=FIG_DPI)
 
     # Cap y-axis to the data range with padding
     y_upper = g["j_per_verified_tok"].max() * 1.25
@@ -261,7 +269,7 @@ for target, g in df.groupby("target"):
         xr = x_range[-1] * 0.95
         yr = P / xr
         if yr < y_upper and yr > 0:
-            ax.text(xr, yr, f"{P} W", fontsize=7, color="#666666",
+            ax.text(xr, yr, f"{P} W", fontsize=8, color="#666666",
                     va="bottom", ha="right")
 
     # Scatter by device
@@ -299,7 +307,7 @@ for target, g in df.groupby("target"):
                 label,
                 xy=(r["goodput"], r["j_per_verified_tok"]),
                 xytext=(14, -16), textcoords="offset points",
-                fontsize=8, fontweight="bold",
+                fontsize=9, fontweight="bold",
                 color=DEVICE_COLORS[dev],
                 arrowprops=dict(arrowstyle="-|>", color=DEVICE_COLORS[dev],
                                 lw=1.0, shrinkA=0, shrinkB=3),
@@ -310,12 +318,12 @@ for target, g in df.groupby("target"):
                 label,
                 xy=(r["goodput"], r["j_per_verified_tok"]),
                 xytext=(8, 6), textcoords="offset points",
-                fontsize=6, alpha=0.6,
+                fontsize=7, alpha=0.6,
                 color=DEVICE_COLORS[dev],
             )
 
     ax.set_xlabel("Verified Goodput  (tok/s)  =  draft_tps $\\times$ $\\alpha$")
-    ax.set_ylabel("Energy per Verified Token  (J/tok)  [lower is better]")
+    ax.set_ylabel("Energy / Verified Token  (J/tok)")
     ax.set_title(
         f"Speed–Energy Tradeoff  (Target: {display_name})", pad=10
     )

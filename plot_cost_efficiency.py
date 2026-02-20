@@ -6,6 +6,13 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 # -----------------------------
+# Figure size configuration (width, height in inches)
+# Adjust these to control aspect ratio for paper layout.
+# -----------------------------
+FIG_DPI          = 300
+FIG_BAR          = (7.0, 3.2)    # bar charts
+
+# -----------------------------
 # Output directory with timestamp
 # -----------------------------
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -97,12 +104,12 @@ def _paper_rc():
         "font.serif":         ["Times New Roman", "DejaVu Serif", "serif"],
         "mathtext.fontset":   "stix",
         "font.size":          10,
-        "axes.labelsize":     11,
-        "axes.titlesize":     12,
+        "axes.labelsize":     12,
+        "axes.titlesize":     13,
         "axes.titleweight":   "bold",
-        "legend.fontsize":    9,
+        "legend.fontsize":    10,
         "xtick.labelsize":    10,
-        "ytick.labelsize":    9,
+        "ytick.labelsize":    10,
         "xtick.direction":    "in",
         "ytick.direction":    "in",
         "xtick.major.width":  0.8,
@@ -133,7 +140,7 @@ for target, g in df.groupby("target"):
     n = len(models)
     x = np.arange(n)
 
-    fig, ax = plt.subplots(figsize=(5.5, 4.2), dpi=300)
+    fig, ax = plt.subplots(figsize=FIG_BAR, dpi=FIG_DPI)
 
     bars = ax.bar(
         x, values, width=0.55,
@@ -153,7 +160,7 @@ for target, g in df.groupby("target"):
             ha="center", va="bottom", fontsize=8,
         )
 
-    ax.set_ylabel("Accepted Tokens per \\$  [higher is better]")
+    ax.set_ylabel("Accepted Tokens per \\$")
     ax.set_title(
         f"Cost Efficiency of Draft Models  (Target: {display_name})", pad=10
     )
