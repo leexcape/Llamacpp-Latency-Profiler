@@ -1,10 +1,24 @@
-import math
 import os
+import argparse
 from datetime import datetime
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+
+# -----------------------------
+# Command-line arguments
+# -----------------------------
+parser = argparse.ArgumentParser(description="Goodput analysis")
+parser.add_argument("--spec-len", type=int, default=5,
+                    help="Fixed speculative length for all configurations (default: 5)")
+parser.add_argument("--optimal-K", action="store_true",
+                    help="Use optimal K* per configuration instead of fixed spec length")
+args = parser.parse_args()
+
+# Label strings for titles and annotations
+K_TITLE = "$K^*$" if args.optimal_K else f"$K$={args.spec_len}"
+K_TAG   = "$K^*$" if args.optimal_K else "$K$"
 
 # -----------------------------
 # Figure size configuration (width, height in inches)
@@ -22,22 +36,68 @@ OUT_DIR = os.path.join("results", "goodput_analysis", TIMESTAMP)
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # -----------------------------
-# 1) Raw inputs (from your screenshots)
+# Verification latency (seconds)
+#   Goodput(K) = (K·α(K) + 1) / (K/draft_tps + T_VERIFY)
 # -----------------------------
-ACC = {
-    # Target: Meta-Llama-3.1-70B
-    ("llama_target_70b", "1b"): 0.5038,
-    ("llama_target_70b", "3b"): 0.5691,
-    ("llama_target_70b", "8b"): 0.6488,
+T_VERIFY = 0.5
 
-    # Target: Qwen3-32B
-    ("qwen_target_32b", "0.6b"): 0.3826,
-    ("qwen_target_32b", "1.7b"): 0.4494,
-    ("qwen_target_32b", "4b"):   0.4705,
-    ("qwen_target_32b", "8b"):   0.5357,
+# -----------------------------
+# 1) Load acceptance-rate sweep data
+# -----------------------------
+_acc_qwen  = pd.read_csv("results/profile_results_2026-02-20_11-42-25.csv")
+_acc_llama = pd.read_csv("results/profile_results_2026-02-20_13-30-21.csv")
+_acc_raw   = pd.concat([_acc_qwen, _acc_llama], ignore_index=True)
+
+# Build lookup: (target_hf, draft_hf) → {K: α(K)}
+ACC_CURVES = {}
+for _, r in _acc_raw.iterrows():
+    key = (r["target_model"], r["draft_model"])
+    if key not in ACC_CURVES:
+        ACC_CURVES[key] = {}
+    ACC_CURVES[key][int(r["spec_len"])] = float(r["mean_acceptance_rate"])
+
+# Mapping: (target_key, model_short, flavor) → (target_hf, draft_hf)
+DRAFT_ACC_MAP = {
+    ("llama_target_70b", "1b", "base"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-1B"),
+    ("llama_target_70b", "1b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-1B-Instruct"),
+    ("llama_target_70b", "3b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-3B-Instruct"),
+    ("llama_target_70b", "8b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Meta-Llama-3.1-8B-Instruct"),
+    ("qwen_target_32b", "0.6b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-0.6B"),
+    ("qwen_target_32b", "1.7b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-1.7B"),
+    ("qwen_target_32b", "4b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-4B"),
+    ("qwen_target_32b", "8b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-8B"),
 }
 
+
+# -----------------------------
+# Goodput helpers
+# -----------------------------
+def _compute_goodput(K, alpha, draft_tps, T_verify):
+    """Goodput = (K·α + 1) / (K/draft_tps + T_verify)."""
+    return (K * alpha + 1.0) / (K / draft_tps + T_verify)
+
+
+def _find_optimal_K(draft_tps, alpha_curve, T_verify):
+    """Return (optimal_K, goodput, alpha_at_optimal_K)."""
+    best_K, best_gp, best_alpha = None, -1.0, None
+    for K in sorted(alpha_curve.keys()):
+        gp = _compute_goodput(K, alpha_curve[K], draft_tps, T_verify)
+        if gp > best_gp:
+            best_K, best_gp, best_alpha = K, gp, alpha_curve[K]
+    return best_K, best_gp, best_alpha
+
+
+# -----------------------------
 # Draft tok/s (RPi4B)
+# -----------------------------
 SPEED_RPI4 = {
     ("llama_target_70b", "1b", "q4_k_m", "inst"): 4.14,
     ("llama_target_70b", "1b", "q4_k_m", "base"):     4.18,
@@ -96,9 +156,20 @@ SPEED_JETSON = {
 rows = []
 def add_rows(device_name, speed_dict):
     for (target, model, quant, flavor), tps in speed_dict.items():
-        acc = ACC.get((target, model))
-        if acc is None:
+        hf_key = DRAFT_ACC_MAP.get((target, model, flavor))
+        if hf_key is None:
             continue
+        alpha_curve = ACC_CURVES.get(hf_key)
+        if alpha_curve is None:
+            continue
+        if args.optimal_K:
+            opt_K, gp, alpha = _find_optimal_K(float(tps), alpha_curve, T_VERIFY)
+        else:
+            opt_K = args.spec_len
+            alpha = alpha_curve.get(opt_K)
+            if alpha is None:
+                continue
+            gp = _compute_goodput(opt_K, alpha, float(tps), T_VERIFY)
         rows.append({
             "target": target,
             "device": device_name,
@@ -106,8 +177,9 @@ def add_rows(device_name, speed_dict):
             "quant": quant,
             "flavor": flavor,
             "draft_tps": float(tps),
-            "accept": float(acc),
-            "goodput_proxy": float(tps) * float(acc),
+            "accept": float(alpha),
+            "optimal_K": int(opt_K),
+            "goodput": float(gp),
             "variant": f"{model}-{flavor}-{quant}",
         })
 
@@ -117,7 +189,7 @@ add_rows("Jetson AGX Orin", SPEED_JETSON)
 df = pd.DataFrame(rows)
 
 # Optional: export table for LaTeX/appendix
-df.to_csv(os.path.join(OUT_DIR, "goodput_proxy_table.csv"), index=False)
+df.to_csv(os.path.join(OUT_DIR, "goodput_table.csv"), index=False)
 
 # -----------------------------
 # 3) Global style – research-paper quality
@@ -147,13 +219,13 @@ def _paper_rc():
         "font.family":       "serif",
         "font.serif":        ["Times New Roman", "DejaVu Serif", "serif"],
         "mathtext.fontset":  "stix",
-        "font.size":         10,
+        "font.size":         15,
         "axes.labelsize":    14,
-        "axes.titlesize":    15,
+        "axes.titlesize":    18,
         "axes.titleweight":  "bold",
-        "legend.fontsize":   10,
-        "xtick.labelsize":   12,
-        "ytick.labelsize":   12,
+        "legend.fontsize":   15,
+        "xtick.labelsize":   15,
+        "ytick.labelsize":   15,
         "xtick.direction":   "in",
         "ytick.direction":   "in",
         "xtick.major.width": 0.8,
@@ -174,19 +246,27 @@ def plot_tradeoff(df_sub: pd.DataFrame, title: str, out_prefix: str):
 
     fig, ax = plt.subplots(figsize=FIG_SCATTER, dpi=FIG_DPI)
 
-    # --- iso-goodput contour curves: y = G / x ---
-    x = np.linspace(0.25, 0.70, 300)
+    # Reference K for iso-goodput curves (median optimal K in this subset)
+    K_ref = int(np.median(df_sub["optimal_K"]))
+
+    # --- iso-goodput contour curves (new model) ---
+    # G = (K_ref·α + 1) / (K_ref/tps + T_VERIFY)
+    # ⟹ tps = K_ref·G / (K_ref·α + 1 − G·T_VERIFY)
+    x = np.linspace(0.25, 0.80, 300)
     iso_values = [0.5, 1, 2, 4, 8, 16, 32, 64]
     y_max = df_sub["draft_tps"].max() * 1.6
     for G in iso_values:
-        y = G / x
+        denom = K_ref * x + 1.0 - G * T_VERIFY
+        y = np.where(denom > 0, K_ref * G / denom, np.nan)
         ax.plot(x, y, linestyle="--", linewidth=0.7, color="#888888", alpha=0.45)
         # place label where curve is still visible
         xr = 0.68
-        yr = G / xr
-        if yr < y_max:
-            ax.text(xr + 0.005, yr, f"$G$={G}", fontsize=8, color="#666666",
-                    va="bottom", ha="left")
+        dr = K_ref * xr + 1.0 - G * T_VERIFY
+        if dr > 0:
+            yr = K_ref * G / dr
+            if 0 < yr < y_max:
+                ax.text(xr + 0.005, yr, f"$G$={G}", fontsize=8, color="#666666",
+                        va="bottom", ha="left")
 
     # --- scatter by device ---
     for dev in DEVICE_ORDER:
@@ -210,9 +290,10 @@ def plot_tradeoff(df_sub: pd.DataFrame, title: str, out_prefix: str):
         g = df_sub[df_sub["device"] == dev]
         if g.empty:
             continue
-        best = g.loc[g["goodput_proxy"].idxmax()]
+        best = g.loc[g["goodput"].idxmax()]
         ax.annotate(
-            f"{best['model']}\n{best['quant']}  $G$={best['goodput_proxy']:.1f}",
+            f"{best['model']}\n{best['quant']}  "
+            f"$G$={best['goodput']:.1f}  {K_TAG}={best['optimal_K']}",
             xy=(best["accept"], best["draft_tps"]),
             xytext=(12, 10),
             textcoords="offset points",
@@ -222,7 +303,7 @@ def plot_tradeoff(df_sub: pd.DataFrame, title: str, out_prefix: str):
                             lw=0.9, shrinkA=0, shrinkB=3),
         )
 
-    ax.set_xlabel("Acceptance Rate  (accepted / proposed)")
+    ax.set_xlabel(f"Acceptance Rate  $\\alpha({K_TAG[1:-1]})$")
     ax.set_ylabel("Draft Decoding Speed  (tok/s)")
     ax.set_title(title, pad=10)
     ax.set_yscale("log")
@@ -244,12 +325,11 @@ def plot_tradeoff(df_sub: pd.DataFrame, title: str, out_prefix: str):
     plt.close(fig)
 
 
-def plot_grouped_bar(df_sub: pd.DataFrame, title: str, out_prefix: str):
-    _paper_rc()
-
+def _draw_grouped_bar(ax, df_sub: pd.DataFrame, title: str, show_legend: bool = True):
+    """Draw a grouped bar chart on the given axes."""
     # pivot to device columns
     pivot = df_sub.pivot_table(
-        index="variant", columns="device", values="goodput_proxy", aggfunc="mean"
+        index="variant", columns="device", values="goodput", aggfunc="mean"
     ).fillna(0.0)
 
     # reorder columns to match DEVICE_ORDER
@@ -265,11 +345,9 @@ def plot_grouped_bar(df_sub: pd.DataFrame, title: str, out_prefix: str):
     width = 0.75 / n_devices
     x = np.arange(n_variants)
 
-    fig, ax = plt.subplots(figsize=FIG_BAR, dpi=FIG_DPI)
-
     for i, dev in enumerate(ordered_cols):
         offset = (i - (n_devices - 1) / 2) * width
-        bars = ax.bar(
+        ax.bar(
             x + offset,
             pivot[dev].values,
             width,
@@ -282,7 +360,7 @@ def plot_grouped_bar(df_sub: pd.DataFrame, title: str, out_prefix: str):
             zorder=3,
         )
 
-    ax.set_ylabel("Goodput Proxy  (tok/s)")
+    ax.set_ylabel("Goodput  (tok/s)")
     ax.set_title(title, pad=10)
     ax.set_xticks(x)
     ax.set_xticklabels(pivot.index, rotation=38, ha="right")
@@ -295,28 +373,41 @@ def plot_grouped_bar(df_sub: pd.DataFrame, title: str, out_prefix: str):
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
 
-    ax.legend(loc="upper right", frameon=True, fancybox=False,
-              edgecolor="#cccccc", framealpha=0.95, ncol=n_devices)
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUT_DIR, f"{out_prefix}_bar.pdf"))
-    fig.savefig(os.path.join(OUT_DIR, f"{out_prefix}_bar.png"))
-    plt.close(fig)
+    if show_legend:
+        ax.legend(loc="upper right", frameon=True, fancybox=False,
+                  edgecolor="#cccccc", framealpha=0.45, ncol=n_devices)
 
 # -----------------------------
 # 5) Generate plots (split by target family)
 # -----------------------------
+TARGET_ORDER = ["llama_target_70b", "qwen_target_32b"]
+BAR_TITLES = {
+    "llama_target_70b": f"Target: Llama-3.1-70B  ({K_TITLE}, $T_{{\\mathrm{{verify}}}}$={T_VERIFY}s)",
+    "qwen_target_32b":  f"Target: Qwen3-32B  ({K_TITLE}, $T_{{\\mathrm{{verify}}}}$={T_VERIFY}s)",
+}
+
+# Scatter tradeoff plots (one per target, unchanged)
 for target, g in df.groupby("target"):
     title = {
-        "llama_target_70b": "Speed–Acceptance Tradeoff  (Target: Llama-3.1-70B)",
-        "qwen_target_32b":  "Speed–Acceptance Tradeoff  (Target: Qwen3-32B)",
+        "llama_target_70b": f"Speed–Acceptance Tradeoff  (Target: Llama-3.1-70B, {K_TITLE}, $T_{{\\mathrm{{verify}}}}$={T_VERIFY}s)",
+        "qwen_target_32b":  f"Speed–Acceptance Tradeoff  (Target: Qwen3-32B, {K_TITLE}, $T_{{\\mathrm{{verify}}}}$={T_VERIFY}s)",
     }.get(target, f"Tradeoff ({target})")
-    out = target
-    plot_tradeoff(g, title, out)
-    bar_title = {
-        "llama_target_70b": "Goodput Proxy Comparison  (Target: Llama-3.1-70B)",
-        "qwen_target_32b":  "Goodput Proxy Comparison  (Target: Qwen3-32B)",
-    }.get(target, f"Goodput proxy ({target})")
-    plot_grouped_bar(g, bar_title, out)
+    plot_tradeoff(g, title, target)
+
+# Combined grouped bar chart (two rows, one per target)
+_paper_rc()
+fig, axes = plt.subplots(
+    2, 1, figsize=(FIG_BAR[0], FIG_BAR[1] * 2),
+    dpi=FIG_DPI, constrained_layout=True,
+)
+
+for row, target in enumerate(TARGET_ORDER):
+    g = df[df["target"] == target]
+    bar_title = BAR_TITLES.get(target, f"Goodput ({target})")
+    _draw_grouped_bar(axes[row], g, bar_title, show_legend=(row == 0))
+
+fig.savefig(os.path.join(OUT_DIR, "goodput_bar.pdf"))
+fig.savefig(os.path.join(OUT_DIR, "goodput_bar.png"))
+plt.close(fig)
 
 print(f"Done. All outputs saved to {OUT_DIR}/")

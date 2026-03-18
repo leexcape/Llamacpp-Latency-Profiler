@@ -1,4 +1,5 @@
 import os
+import argparse
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -6,11 +7,29 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 # -----------------------------
+# Command-line arguments
+# -----------------------------
+parser = argparse.ArgumentParser(description="Energy efficiency analysis")
+parser.add_argument("--spec-len", type=int, default=5,
+                    help="Fixed speculative length for all configurations (default: 5)")
+parser.add_argument("--optimal-K", action="store_true",
+                    help="Use optimal K* per configuration instead of fixed spec length")
+parser.add_argument("--scatter-width", type=float, default=7.5,
+                    help="Scatter figure width in inches (default: 7.5)")
+parser.add_argument("--scatter-height", type=float, default=2.8,
+                    help="Scatter figure height per subplot in inches (default: 2.8)")
+args = parser.parse_args()
+
+# Label strings for titles and annotations
+K_TITLE = "$K^*$" if args.optimal_K else f"$K$={args.spec_len}"
+K_TAG   = "$K^*$" if args.optimal_K else "$K$"
+
+# -----------------------------
 # Figure size configuration (width, height in inches)
 # Adjust these to control aspect ratio for paper layout.
 # -----------------------------
 FIG_DPI          = 300
-FIG_SCATTER      = (7.5, 3.2)    # scatter / tradeoff plots
+FIG_SCATTER      = (args.scatter_width, args.scatter_height)
 FIG_BAR          = (11.0, 3.6)   # grouped bar charts
 
 # -----------------------------
@@ -30,21 +49,75 @@ CSV_FILES = [
 raw = pd.concat([pd.read_csv(f) for f in CSV_FILES], ignore_index=True)
 
 # -----------------------------
-# 2) Acceptance rates (target, hf_model) → α
+# Verification latency (seconds)
+#   Goodput(K) = (K·α(K) + 1) / (K/draft_tps + T_VERIFY)
 # -----------------------------
-ACC = {
-    # Target: Meta-Llama-3.1-70B
-    ("llama_target_70b", "llama-3.2-1b"):          0.5038,
-    ("llama_target_70b", "llama-3.2-1b-instruct"):  0.5102,
-    ("llama_target_70b", "llama-3.2-3b"):           0.5691,
-    ("llama_target_70b", "llama-3.1-8b"):           0.6488,
+T_VERIFY = 0.5
 
-    # Target: Qwen3-32B
-    ("qwen_target_32b", "qwen3-0.6b"): 0.3826,
-    ("qwen_target_32b", "qwen3-1.7b"): 0.4494,
-    ("qwen_target_32b", "qwen3-4b"):   0.4705,
-    ("qwen_target_32b", "qwen3-8b"):   0.5357,
+# -----------------------------
+# 2) Load acceptance-rate sweep data
+# -----------------------------
+_acc_qwen  = pd.read_csv("results/profile_results_2026-02-20_11-42-25.csv")
+_acc_llama = pd.read_csv("results/profile_results_2026-02-20_13-30-21.csv")
+_acc_raw   = pd.concat([_acc_qwen, _acc_llama], ignore_index=True)
+
+# Build lookup: (target_hf, draft_hf) → {K: α(K)}
+ACC_CURVES = {}
+for _, r in _acc_raw.iterrows():
+    key = (r["target_model"], r["draft_model"])
+    if key not in ACC_CURVES:
+        ACC_CURVES[key] = {}
+    ACC_CURVES[key][int(r["spec_len"])] = float(r["mean_acceptance_rate"])
+
+# Mapping: (target_key, model_short, flavor) → (target_hf, draft_hf)
+DRAFT_ACC_MAP = {
+    ("llama_target_70b", "1b", "base"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-1B"),
+    ("llama_target_70b", "1b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-1B-Instruct"),
+    ("llama_target_70b", "3b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-3B-Instruct"),
+    ("llama_target_70b", "8b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Meta-Llama-3.1-8B-Instruct"),
+    ("qwen_target_32b", "0.6b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-0.6B"),
+    ("qwen_target_32b", "1.7b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-1.7B"),
+    ("qwen_target_32b", "4b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-4B"),
+    ("qwen_target_32b", "8b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-8B"),
 }
+
+# Map hf_model → (model_short, flavor) for DRAFT_ACC_MAP lookup
+HF_TO_DRAFT = {
+    "llama-3.2-1b":          ("1b", "base"),
+    "llama-3.2-1b-instruct": ("1b", "inst"),
+    "llama-3.2-3b":          ("3b", "inst"),
+    "llama-3.1-8b":          ("8b", "inst"),
+    "qwen3-0.6b":            ("0.6b", "base"),
+    "qwen3-1.7b":            ("1.7b", "base"),
+    "qwen3-4b":              ("4b", "base"),
+    "qwen3-8b":              ("8b", "base"),
+}
+
+
+# -----------------------------
+# Goodput helpers
+# -----------------------------
+def _compute_goodput(K, alpha, draft_tps, T_verify):
+    """Goodput = (K·α + 1) / (K/draft_tps + T_verify)."""
+    return (K * alpha + 1.0) / (K / draft_tps + T_verify)
+
+
+def _find_optimal_K(draft_tps, alpha_curve, T_verify):
+    """Return (optimal_K, goodput, alpha_at_optimal_K)."""
+    best_K, best_gp, best_alpha = None, -1.0, None
+    for K in sorted(alpha_curve.keys()):
+        gp = _compute_goodput(K, alpha_curve[K], draft_tps, T_verify)
+        if gp > best_gp:
+            best_K, best_gp, best_alpha = K, gp, alpha_curve[K]
+    return best_K, best_gp, best_alpha
 
 # -----------------------------
 # 3) Map GGUF filename → (target, hf_model, quant)
@@ -77,7 +150,8 @@ DEVICE_MAP = {
 # -----------------------------
 # 4) Build analysis dataframe
 #
-#    J/verified_token = power_avg_w / (tok_s_avg × α)
+#    Goodput(K) = (K·α(K) + 1) / (K/draft_tps + T_VERIFY)
+#    J/verified_token = power_avg_w / Goodput
 # -----------------------------
 rows = []
 for _, r in raw.iterrows():
@@ -85,8 +159,16 @@ for _, r in raw.iterrows():
     if mapping is None:
         continue
     target, hf_model, quant = mapping
-    acc = ACC.get((target, hf_model))
-    if acc is None:
+
+    draft_info = HF_TO_DRAFT.get(hf_model)
+    if draft_info is None:
+        continue
+    model_short, flavor = draft_info
+    hf_key = DRAFT_ACC_MAP.get((target, model_short, flavor))
+    if hf_key is None:
+        continue
+    alpha_curve = ACC_CURVES.get(hf_key)
+    if alpha_curve is None:
         continue
 
     device = DEVICE_MAP.get(r["device"])
@@ -95,8 +177,19 @@ for _, r in raw.iterrows():
 
     tok_s = float(r["tok_s_avg"])
     power_w = float(r["power_avg_w"])
-    goodput = tok_s * acc
-    j_per_verified = power_w / goodput
+
+    if args.optimal_K:
+        opt_K, goodput, alpha = _find_optimal_K(tok_s, alpha_curve, T_VERIFY)
+    else:
+        opt_K = args.spec_len
+        alpha = alpha_curve.get(opt_K)
+        if alpha is None:
+            continue
+        goodput = _compute_goodput(opt_K, alpha, tok_s, T_VERIFY)
+
+    # Only count energy during local drafting (K/draft_tps);
+    # T_verify happens on the remote server, not the local device.
+    j_per_verified = power_w * (opt_K / tok_s) / (opt_K * alpha + 1.0)
 
     rows.append({
         "target":              target,
@@ -105,7 +198,8 @@ for _, r in raw.iterrows():
         "quant":               quant,
         "tok_s":               tok_s,
         "power_w":             power_w,
-        "accept":              acc,
+        "accept":              alpha,
+        "optimal_K":           int(opt_K),
         "goodput":             goodput,
         "j_per_verified_tok":  j_per_verified,
     })
@@ -154,13 +248,13 @@ def _paper_rc():
         "font.family":        "serif",
         "font.serif":         ["Times New Roman", "DejaVu Serif", "serif"],
         "mathtext.fontset":   "stix",
-        "font.size":          10,
-        "axes.labelsize":     12,
-        "axes.titlesize":     13,
+        "font.size":          15,
+        "axes.labelsize":     15,
+        "axes.titlesize":     18,
         "axes.titleweight":   "bold",
         "legend.fontsize":    10,
-        "xtick.labelsize":    10,
-        "ytick.labelsize":    10,
+        "xtick.labelsize":    15,
+        "ytick.labelsize":    15,
         "xtick.direction":    "in",
         "ytick.direction":    "in",
         "xtick.major.width":  0.8,
@@ -174,13 +268,15 @@ def _paper_rc():
 
 
 # -----------------------------
-# 6) Per-target grouped bar chart: J / verified token
+# 6) Combined grouped bar chart: J / verified token (two rows)
 # -----------------------------
-for target, g in df.groupby("target"):
-    _paper_rc()
+TARGET_ORDER = ["llama_target_70b", "qwen_target_32b"]
+
+
+def _draw_energy_bar(ax, g, target, show_legend=True):
+    """Draw an energy-efficiency grouped bar chart on the given axes."""
     display_name = TARGET_DISPLAY[target]
 
-    # Build variant display label
     g = g.copy()
     g["variant_display"] = g.apply(
         lambda r: f"{MODEL_DISPLAY.get(r['hf_model'], r['hf_model'])}\n({r['quant']})",
@@ -192,11 +288,9 @@ for target, g in df.groupby("target"):
         values="j_per_verified_tok", aggfunc="mean",
     ).fillna(0.0)
 
-    # Reorder columns to match DEVICE_ORDER
     ordered_cols = [d for d in DEVICE_ORDER if d in pivot.columns]
     pivot = pivot[ordered_cols]
 
-    # Sort by Jetson value ascending (most efficient first)
     sort_col = "Jetson AGX Orin" if "Jetson AGX Orin" in pivot.columns else ordered_cols[0]
     pivot = pivot.sort_values(by=sort_col, ascending=True)
 
@@ -204,8 +298,6 @@ for target, g in df.groupby("target"):
     n_devices = len(ordered_cols)
     width = 0.75 / n_devices
     x = np.arange(n_variants)
-
-    fig, ax = plt.subplots(figsize=FIG_BAR, dpi=FIG_DPI)
 
     for i, dev in enumerate(ordered_cols):
         offset = (i - (n_devices - 1) / 2) * width
@@ -218,39 +310,46 @@ for target, g in df.groupby("target"):
             alpha=0.88, zorder=3,
         )
 
-    ax.set_ylabel("Energy / Verified Token  (J/tok)")
+    ax.set_ylabel("J / Verified Token")
     ax.set_title(
-        f"Energy Efficiency Comparison  (Target: {display_name})", pad=10
+        f"Energy Efficiency Comparison  (Target: {display_name}, {K_TITLE}", pad=10
     )
     ax.set_xticks(x)
     ax.set_xticklabels(pivot.index, rotation=38, ha="right")
 
-    # Light horizontal grid behind bars
     ax.grid(True, axis="y", linestyle="-", linewidth=0.4, alpha=0.35, zorder=0)
     ax.set_axisbelow(True)
 
-    # Tidy spines
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
 
-    ax.legend(loc="upper left", frameon=True, fancybox=False,
-              edgecolor="#cccccc", framealpha=0.95, ncol=n_devices)
+    if show_legend:
+        ax.legend(loc="upper left", frameon=True, fancybox=False,
+                  edgecolor="#cccccc", framealpha=0.95, ncol=n_devices)
 
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUT_DIR, f"{target}_energy_bar.pdf"))
-    fig.savefig(os.path.join(OUT_DIR, f"{target}_energy_bar.png"))
-    plt.close(fig)
+
+_paper_rc()
+fig, axes = plt.subplots(
+    2, 1, figsize=(FIG_BAR[0], FIG_BAR[1] * 2),
+    dpi=FIG_DPI, constrained_layout=True,
+)
+
+for row, target in enumerate(TARGET_ORDER):
+    g = df[df["target"] == target]
+    _draw_energy_bar(axes[row], g, target, show_legend=(row == 0))
+
+fig.savefig(os.path.join(OUT_DIR, "energy_bar.pdf"))
+fig.savefig(os.path.join(OUT_DIR, "energy_bar.png"))
+plt.close(fig)
 
 
 # -----------------------------
-# 7) Per-target scatter: Goodput vs J/verified_token
+# 7) Combined scatter: Goodput vs J/verified_token (two rows)
 #    Iso-power curves: power = J/tok × goodput ⇒ J/tok = P / goodput
 # -----------------------------
-for target, g in df.groupby("target"):
-    _paper_rc()
+def _draw_energy_scatter(ax, g, target, show_legend=True):
+    """Draw a speed-energy scatter plot on the given axes."""
     display_name = TARGET_DISPLAY[target]
-
-    fig, ax = plt.subplots(figsize=FIG_SCATTER, dpi=FIG_DPI)
 
     # Cap y-axis to the data range with padding
     y_upper = g["j_per_verified_tok"].max() * 1.25
@@ -294,38 +393,27 @@ for target, g in df.groupby("target"):
             continue
         best_indices.add(gg["j_per_verified_tok"].idxmin())
 
-    # Annotate ALL points; frontier points get bold + arrow, others get muted text
-    for idx, r in g.iterrows():
+    # Annotate only the best (lowest J/tok) point per device
+    for idx in best_indices:
+        r = g.loc[idx]
         dev = r["device"]
         model_label = MODEL_DISPLAY.get(r["hf_model"], r["hf_model"])
-        is_frontier = idx in best_indices
+        label = (f"{model_label}\n({r['quant']})  "
+                 f"{r['j_per_verified_tok']:.2f} J/tok")
+        ax.annotate(
+            label,
+            xy=(r["goodput"], r["j_per_verified_tok"]),
+            xytext=(14, -16), textcoords="offset points",
+            fontsize=9, fontweight="bold",
+            color=DEVICE_COLORS[dev],
+            arrowprops=dict(arrowstyle="-|>", color=DEVICE_COLORS[dev],
+                            lw=1.0, shrinkA=0, shrinkB=3),
+        )
 
-        if is_frontier:
-            label = (f"{model_label}\n({r['quant']})  "
-                     f"{r['j_per_verified_tok']:.2f} J/tok")
-            ax.annotate(
-                label,
-                xy=(r["goodput"], r["j_per_verified_tok"]),
-                xytext=(14, -16), textcoords="offset points",
-                fontsize=9, fontweight="bold",
-                color=DEVICE_COLORS[dev],
-                arrowprops=dict(arrowstyle="-|>", color=DEVICE_COLORS[dev],
-                                lw=1.0, shrinkA=0, shrinkB=3),
-            )
-        else:
-            label = f"{model_label} ({r['quant']})"
-            ax.annotate(
-                label,
-                xy=(r["goodput"], r["j_per_verified_tok"]),
-                xytext=(8, 6), textcoords="offset points",
-                fontsize=7, alpha=0.6,
-                color=DEVICE_COLORS[dev],
-            )
-
-    ax.set_xlabel("Verified Goodput  (tok/s)  =  draft_tps $\\times$ $\\alpha$")
-    ax.set_ylabel("Energy / Verified Token  (J/tok)")
+    ax.set_xlabel("Verified Goodput  (tok/s)  =  $(K\\alpha(K)+1)\\,/\\,(K/\\mathrm{tps}+T_{\\mathrm{verify}})$")
+    ax.set_ylabel("J / Verified Token")
     ax.set_title(
-        f"Speed–Energy Tradeoff  (Target: {display_name})", pad=10
+        f"Speed–Energy Tradeoff  (Target: {display_name}, {K_TITLE}", pad=10
     )
 
     # Light grid
@@ -335,12 +423,23 @@ for target, g in df.groupby("target"):
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
 
-    ax.legend(loc="upper right", frameon=True, fancybox=False,
-              edgecolor="#cccccc", framealpha=0.95)
+    if show_legend:
+        ax.legend(loc="upper center", frameon=True, fancybox=False,
+                  edgecolor="#cccccc", framealpha=0.95)
 
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUT_DIR, f"{target}_energy_scatter.pdf"))
-    fig.savefig(os.path.join(OUT_DIR, f"{target}_energy_scatter.png"))
-    plt.close(fig)
+
+_paper_rc()
+fig, axes = plt.subplots(
+    2, 1, figsize=(FIG_SCATTER[0], FIG_SCATTER[1] * 2),
+    dpi=FIG_DPI, constrained_layout=True,
+)
+
+for row, target in enumerate(TARGET_ORDER):
+    g = df[df["target"] == target]
+    _draw_energy_scatter(axes[row], g, target, show_legend=(row == 0))
+
+fig.savefig(os.path.join(OUT_DIR, "energy_scatter.pdf"))
+fig.savefig(os.path.join(OUT_DIR, "energy_scatter.png"))
+plt.close(fig)
 
 print(f"Done. All outputs saved to {OUT_DIR}/")

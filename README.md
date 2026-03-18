@@ -1,24 +1,93 @@
 # Llamacpp-Latency-Profiler
 
-A comprehensive benchmarking tool for [llama.cpp](https://github.com/ggerganov/llama.cpp) based GGUF models. Measures generation latency, tokens per second, and captures detailed device and model metadata across diverse hardware platforms.
+A comprehensive benchmarking and analysis tool for [llama.cpp](https://github.com/ggerganov/llama.cpp) based GGUF models. Measures generation latency, tokens per second, power consumption, and provides publication-ready analysis of speculative decoding performance across diverse edge hardware platforms.
 
 ## Features
 
-- **Cross-Platform Support**: Works on CPU, GPU (CUDA), Raspberry Pi, Jetson, and other ARM devices
-- **Detailed Statistics**: Mean, std, min, max, median, and percentiles (p5, p25, p75, p95)
+- **Cross-Platform Profiling**: Benchmarks on CPU, GPU (CUDA), Raspberry Pi 4B/5, Jetson AGX Orin, and other ARM devices
+- **Detailed Statistics**: Mean, std, min, max, median, and percentiles (p5, p25, p75, p95) for latency and throughput
 - **Device Profiling**: Captures CPU frequency, temperature, memory usage, and hardware model
+- **Power Monitoring**: Real-time power measurement on Raspberry Pi via INA219 sensor (`Rpi_power_monitor.py`)
 - **Model Metadata**: Extracts file size, quantization type, and model information
-- **Warmup Runs**: Configurable warmup iterations for consistent measurements
-- **Memory Tracking**: Monitors RAM usage before, during, and after benchmarking
-- **Timestamped Results**: ISO 8601 timestamps with detailed per-run timing
-- **JSON Output**: Structured results for easy analysis and comparison
+- **Speculative Decoding Analysis**: Goodput, cost efficiency, energy efficiency, and speculative-length optimisation
+
+## Analysis Scripts
+
+All analysis scripts produce publication-quality figures (PDF + PNG) with a consistent visual style.
+
+### `plot_goodput.py` — Goodput Analysis
+
+Computes the **goodput** (accepted tokens/s) for each draft-model + device combination using the speculative decoding throughput model:
+
+```
+Goodput(K) = (K * alpha(K) + 1) / (K / draft_tps + T_verify)
+```
+
+- Loads acceptance-rate sweep data from profiling CSVs
+- For each configuration, finds the **optimal speculative length K\*** that maximises goodput
+- `T_VERIFY` (verification latency) is configurable at the top of the script
+- **Outputs**: scatter tradeoff plots (acceptance rate vs draft speed with iso-goodput curves) and grouped bar charts, split by target model family (Llama-3.1-70B, Qwen3-32B)
+
+### `plot_spec_length_analysis.py` — Speculative Length Analysis
+
+Analyses the trade-off between speculative length K and throughput:
+
+1. **Acceptance Rate Decay** (`acceptance_rate_vs_speclen`) — shows how alpha drops as K increases
+2. **Tokens per Round** (`tokens_per_round_vs_speclen`) — shows sub-linear growth of K*alpha(K), with ideal reference line and wasted-token shading
+3. **Goodput vs K** (`goodput_vs_speclen`) — 2x3 grid (target x device) showing goodput curves with optimal K\* marked, at a configurable T_verify
+4. **Optimal K\* vs T_verify** (`optimal_speclen_vs_Tverify`) — 2x3 grid showing how the optimal speculative length shifts with verification latency
+5. **Summary CSV** (`optimal_speclen_summary.csv`) — optimal K\* and goodput for representative T_verify values across all 120 configurations
+
+### `plot_cost_efficiency.py` — Cost Efficiency Analysis
+
+Computes **accepted tokens per dollar** using cloud API pricing (device/quant independent since draft speed cancels out):
+
+```
+tokens_per_$ = alpha * 1e6 / price_per_M_output
+```
+
+- Pricing: Fireworks (Llama-70B) @ $0.90/M output tokens, Groq (Qwen3-32B) @ $0.59/M
+- **Outputs**: per-target bar charts of cost efficiency
+
+### `plot_energy_efficiency.py` — Energy Efficiency Analysis
+
+Computes **joules per verified token** from measured power draw:
+
+```
+J/verified_tok = power_avg_w / (draft_tps * alpha)
+```
+
+- Uses profiling CSVs with power measurements (RPi 5, Jetson AGX Orin)
+- **Outputs**: grouped bar charts (J/tok) and scatter plots (goodput vs J/tok with iso-power curves)
+
+### `Rpi_power_monitor.py` — Power Monitor
+
+Real-time power measurement for Raspberry Pi using the INA219 current sensor over I2C.
+
+## Data
+
+### Profiling Results (`results/`)
+
+| File | Description |
+|------|-------------|
+| `pi5_llamacpp_profile_19models.csv` | RPi 5 latency + power profiling of 19 GGUF models |
+| `jetson_agx_orin_llamacpp_profile_19models.csv` | Jetson AGX Orin profiling of 19 GGUF models |
+| `profile_results_2026-02-20_11-42-25.csv` | Acceptance-rate sweep (K=2..10) for Qwen3-32B target |
+| `profile_results_2026-02-20_13-30-21.csv` | Acceptance-rate sweep (K=2..10) for Llama-3.1-70B target |
+
+### Model Families
+
+| Target Model | Draft Models | Devices |
+|-------------|-------------|---------|
+| Meta-Llama-3.1-70B-Instruct | Llama-3.2-1B, 1B-Instruct, 3B-Instruct, 3.1-8B-Instruct | RPi 4B, RPi 5, Jetson AGX Orin |
+| Qwen3-32B | Qwen3-0.6B, 1.7B, 4B, 8B | RPi 4B, RPi 5, Jetson AGX Orin |
 
 ## Installation
 
 ### Requirements
 
 ```bash
-pip install llama-cpp-python numpy
+pip install llama-cpp-python numpy pandas matplotlib
 ```
 
 Optional (for CUDA device info):
@@ -35,13 +104,13 @@ cd Llamacpp-Latency-Profiler
 
 ## Usage
 
-### Basic Usage
+### Profiling
 
 ```bash
 python main.py --model /path/to/model.gguf
 ```
 
-### Full Options
+Full options:
 
 ```bash
 python main.py --model /path/to/model.gguf \
@@ -70,180 +139,41 @@ python main.py --model /path/to/model.gguf \
 | `--verbose` | `-v` | false | Enable verbose output |
 | `--quiet` | `-q` | false | Minimal output (only summary) |
 
-### Examples
+### Running Analysis Scripts
 
-**Quick benchmark with default settings:**
 ```bash
-python main.py -m model.gguf
+# Goodput analysis (uses optimal K* and new goodput model)
+python plot_goodput.py
+
+# Speculative-length trade-off analysis
+python plot_spec_length_analysis.py
+
+# Cost efficiency analysis
+python plot_cost_efficiency.py
+
+# Energy efficiency analysis
+python plot_energy_efficiency.py
 ```
 
-**Thorough benchmark with warmup:**
-```bash
-python main.py -m model.gguf -r 30 -w 3 -v
-```
-
-**GPU-accelerated benchmark:**
-```bash
-python main.py -m model.gguf --n-gpu-layers 35 --threads 8
-```
-
-**Custom prompt with saved outputs:**
-```bash
-python main.py -m model.gguf -p "Write a poem about AI" --save-outputs
-```
-
-## Output Format
-
-Results are saved as JSON files in the `results/` directory with the naming pattern:
-```
-benchmark_{model_name}_{timestamp}.json
-```
-
-### JSON Structure
-
-```json
-{
-  "meta": {
-    "timestamp": "2024-01-15_14-30-00",
-    "timestamp_iso": "2024-01-15T14:30:00+00:00",
-    "end_timestamp_iso": "2024-01-15T14:35:00+00:00",
-    "profiler_version": "2.0.0"
-  },
-  "config": {
-    "model_path": "/path/to/model.gguf",
-    "prompt": "...",
-    "max_tokens": 200,
-    "temperature": 0,
-    "threads": 4,
-    "n_gpu_layers": 0,
-    "ctx_size": 2048,
-    "warmup_runs": 1,
-    "benchmark_runs": 10
-  },
-  "model_info": {
-    "path": "/path/to/model.gguf",
-    "filename": "model.gguf",
-    "size_bytes": 2104932768,
-    "size_mb": 2007.42,
-    "size_gb": 1.96,
-    "quantization": "Q4_K_M"
-  },
-  "device_info": {
-    "hostname": "raspberrypi",
-    "system": "Linux",
-    "release": "6.12.47+rpt-rpi-2712",
-    "machine": "aarch64",
-    "processor": "",
-    "platform": "Linux-6.12.47+rpt-rpi-2712-aarch64-with-glibc2.36",
-    "python_version": "3.11.2",
-    "cpu_count": 4,
-    "cpu_freq": {"current_mhz": 2400, "max_mhz": 2400},
-    "cpu_temp_celsius": 52.5,
-    "hardware_model": "Raspberry Pi 5 Model B Rev 1.0"
-  },
-  "memory": {
-    "initial": {"total_mb": 8192, "available_mb": 6000, "usage_percent": 26.76},
-    "post_model_load": {"total_mb": 8192, "available_mb": 4000, "usage_percent": 51.17},
-    "final": {"total_mb": 8192, "available_mb": 4100, "usage_percent": 49.95}
-  },
-  "timing": {
-    "model_load_sec": 2.5432,
-    "total_benchmark_sec": 180.5,
-    "total_benchmark_human": "3m 0.5s"
-  },
-  "statistics": {
-    "elapsed_time_sec": {
-      "count": 10,
-      "mean": 18.05,
-      "std": 0.23,
-      "min": 17.8,
-      "max": 18.4,
-      "median": 18.02,
-      "p5": 17.82,
-      "p25": 17.9,
-      "p75": 18.15,
-      "p95": 18.35
-    },
-    "tokens_per_second": {
-      "count": 10,
-      "mean": 11.08,
-      "std": 0.14,
-      "min": 10.87,
-      "max": 11.24,
-      "median": 11.09,
-      "p5": 10.89,
-      "p25": 10.98,
-      "p75": 11.18,
-      "p95": 11.22
-    },
-    "completion_tokens": {
-      "count": 10,
-      "mean": 200,
-      "std": 0,
-      "min": 200,
-      "max": 200,
-      "median": 200,
-      "p5": 200,
-      "p25": 200,
-      "p75": 200,
-      "p95": 200
-    }
-  },
-  "runs": [
-    {
-      "run_number": 1,
-      "timestamp": "2024-01-15T14:30:05+00:00",
-      "elapsed_sec": 18.05,
-      "prompt_tokens": 12,
-      "completion_tokens": 200,
-      "total_tokens": 212,
-      "tokens_per_sec": 11.08,
-      "cpu_temp_start": 52.0,
-      "cpu_temp_end": 55.0,
-      "memory_usage_percent": 51.2
-    }
-  ]
-}
-```
+Each script writes timestamped output to `results/<analysis_name>/<timestamp>/`.
 
 ## Supported Platforms
 
 | Platform | Status | Notes |
 |----------|--------|-------|
-| x86_64 Linux | ✅ | Full support |
-| x86_64 macOS | ✅ | Full support |
-| Raspberry Pi 4/5 | ✅ | Temperature and CPU freq monitoring |
-| NVIDIA Jetson | ✅ | Tegra info capture |
-| CUDA GPUs | ✅ | VRAM and nvidia-smi support |
-| Windows | ⚠️ | Basic support (no temp monitoring) |
+| x86_64 Linux | Supported | Full support |
+| x86_64 macOS | Supported | Full support |
+| Raspberry Pi 4/5 | Supported | Temperature, CPU freq, and power monitoring |
+| NVIDIA Jetson AGX Orin | Supported | Tegra info and power monitoring |
+| CUDA GPUs | Supported | VRAM and nvidia-smi support |
 
 ## Tips for Accurate Benchmarking
 
-1. **Use warmup runs**: At least 1-2 warmup runs help stabilize measurements
-2. **Close other applications**: Minimize background processes for consistent results
+1. **Use warmup runs**: At least 1-2 warmup runs help stabilise measurements
+2. **Close other applications**: Minimise background processes for consistent results
 3. **Temperature stability**: On Raspberry Pi, consider cooling; high temps cause throttling
 4. **Sufficient runs**: Use 10+ runs for statistically meaningful results
 5. **Consistent prompts**: Use the same prompt when comparing models
-
-## Analyzing Results
-
-Results can be loaded and analyzed in Python:
-
-```python
-import json
-import glob
-
-# Load latest result
-files = sorted(glob.glob("results/benchmark_*.json"))
-with open(files[-1]) as f:
-    data = json.load(f)
-
-# Print summary
-stats = data["statistics"]["tokens_per_second"]
-print(f"Model: {data['model_info']['filename']}")
-print(f"Speed: {stats['mean']:.2f} ± {stats['std']:.2f} tokens/sec")
-print(f"Device: {data['device_info'].get('hardware_model', 'Unknown')}")
-```
 
 ## License
 

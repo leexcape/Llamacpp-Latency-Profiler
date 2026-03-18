@@ -2,8 +2,18 @@
 slurm_logs/*
 !slurm_logs/.gitkeep
 
+# Results - keep folder structure, ignore contents
+results/*/*
+
+# Agent workflow
+.claude/
+
 # IDE
 .idea/
+.vscode/
+
+# Personal files
+TDIS*.pdf
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

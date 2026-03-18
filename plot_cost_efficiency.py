@@ -1,4 +1,5 @@
 import os
+import argparse
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -6,11 +7,29 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 # -----------------------------
+# Command-line arguments
+# -----------------------------
+parser = argparse.ArgumentParser(description="Cost efficiency analysis")
+parser.add_argument("--spec-len", type=int, default=5,
+                    help="Fixed speculative length for all configurations (default: 5)")
+parser.add_argument("--optimal-K", action="store_true",
+                    help="Use optimal K* per configuration instead of fixed spec length")
+parser.add_argument("--fig-width", type=float, default=7.0,
+                    help="Figure width in inches (default: 7.0)")
+parser.add_argument("--fig-height", type=float, default=2.8,
+                    help="Figure height in inches (default: 2.8)")
+args = parser.parse_args()
+
+# Label strings for titles and annotations
+K_TITLE = "$K^*$" if args.optimal_K else f"$K$={args.spec_len}"
+K_TAG   = "$K^*$" if args.optimal_K else "$K$"
+
+# -----------------------------
 # Figure size configuration (width, height in inches)
 # Adjust these to control aspect ratio for paper layout.
 # -----------------------------
 FIG_DPI          = 300
-FIG_BAR          = (7.0, 3.2)    # bar charts
+FIG_BAR          = (args.fig_width, args.fig_height)
 
 # -----------------------------
 # Output directory with timestamp
@@ -20,21 +39,64 @@ OUT_DIR = os.path.join("results", "cost_efficiency_analysis", TIMESTAMP)
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # -----------------------------
-# 1) Acceptance rates (per HF model pair — device / quant independent)
+# 1) Load acceptance-rate sweep data
 # -----------------------------
-ACC = {
-    # Target: Meta-Llama-3.1-70B
-    ("llama_target_70b", "llama-3.2-1b"): 0.5038,
-    ("llama_target_70b", "llama-3.2-1b-instruct"): 0.5102,
-    ("llama_target_70b", "llama-3.2-3b"): 0.5691,
-    ("llama_target_70b", "llama-3.1-8b"): 0.6488,
+_acc_qwen  = pd.read_csv("results/profile_results_2026-02-20_11-42-25.csv")
+_acc_llama = pd.read_csv("results/profile_results_2026-02-20_13-30-21.csv")
+_acc_raw   = pd.concat([_acc_qwen, _acc_llama], ignore_index=True)
 
-    # Target: Qwen3-32B
-    ("qwen_target_32b", "qwen3-0.6b"): 0.3826,
-    ("qwen_target_32b", "qwen3-1.7b"): 0.4494,
-    ("qwen_target_32b", "qwen3-4b"):  0.4705,
-    ("qwen_target_32b", "qwen3-8b"):  0.5357,
+# Build lookup: (target_hf, draft_hf) → {K: α(K)}
+ACC_CURVES = {}
+for _, r in _acc_raw.iterrows():
+    key = (r["target_model"], r["draft_model"])
+    if key not in ACC_CURVES:
+        ACC_CURVES[key] = {}
+    ACC_CURVES[key][int(r["spec_len"])] = float(r["mean_acceptance_rate"])
+
+# Mapping: (target_key, model_short, flavor) → (target_hf, draft_hf)
+DRAFT_ACC_MAP = {
+    ("llama_target_70b", "1b", "base"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-1B"),
+    ("llama_target_70b", "1b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-1B-Instruct"),
+    ("llama_target_70b", "3b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Llama-3.2-3B-Instruct"),
+    ("llama_target_70b", "8b", "inst"): (
+        "meta-llama/Meta-Llama-3.1-70B-Instruct", "meta-llama/Meta-Llama-3.1-8B-Instruct"),
+    ("qwen_target_32b", "0.6b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-0.6B"),
+    ("qwen_target_32b", "1.7b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-1.7B"),
+    ("qwen_target_32b", "4b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-4B"),
+    ("qwen_target_32b", "8b", "base"): (
+        "Qwen/Qwen3-32B", "Qwen/Qwen3-8B"),
 }
+
+# Map hf_model → (model_short, flavor) for DRAFT_ACC_MAP lookup
+HF_TO_DRAFT = {
+    "llama-3.2-1b":          ("1b", "base"),
+    "llama-3.2-1b-instruct": ("1b", "inst"),
+    "llama-3.2-3b":          ("3b", "inst"),
+    "llama-3.1-8b":          ("8b", "inst"),
+    "qwen3-0.6b":            ("0.6b", "base"),
+    "qwen3-1.7b":            ("1.7b", "base"),
+    "qwen3-4b":              ("4b", "base"),
+    "qwen3-8b":              ("8b", "base"),
+}
+
+
+def _find_optimal_K_cost(alpha_curve):
+    """Return (optimal_K, accepted_per_verified, alpha_at_K).
+
+    Maximises (K·α(K)+1)/K = α(K)+1/K  (accepted tokens per verified token).
+    """
+    best_K, best_ratio, best_alpha = None, -1.0, None
+    for K in sorted(alpha_curve.keys()):
+        ratio = (K * alpha_curve[K] + 1.0) / K
+        if ratio > best_ratio:
+            best_K, best_ratio, best_alpha = K, ratio, alpha_curve[K]
+    return best_K, best_ratio, best_alpha
 
 # -----------------------------
 # 2) Verifier pricing (output tokens, $/1M tokens)
@@ -47,21 +109,45 @@ PRICE_OUT_PER_M = {
 # -----------------------------
 # 3) Derive cost efficiency
 #
-#    tokens_per_$ = (draft_tps × acc) / (price_per_token × draft_tps)
-#                 = acc / price_per_token
-#                 = acc × 1e6 / price_per_M
+#    tokens_per_$ = (K·α(K) + 1) / K × 1e6 / price_per_M
+#                 = (α(K) + 1/K) × 1e6 / price_per_M
 #
+#    Optimal K* maximises accepted tokens per verified token: (K·α(K)+1)/K.
 #    draft_tps cancels ⇒ metric is INDEPENDENT of device and quantization.
 # -----------------------------
+DRAFT_HF_PAIRS = [
+    ("llama_target_70b", "llama-3.2-1b"),
+    ("llama_target_70b", "llama-3.2-1b-instruct"),
+    ("llama_target_70b", "llama-3.2-3b"),
+    ("llama_target_70b", "llama-3.1-8b"),
+    ("qwen_target_32b",  "qwen3-0.6b"),
+    ("qwen_target_32b",  "qwen3-1.7b"),
+    ("qwen_target_32b",  "qwen3-4b"),
+    ("qwen_target_32b",  "qwen3-8b"),
+]
+
 rows = []
-for (target, model), acc in ACC.items():
+for target, hf_model in DRAFT_HF_PAIRS:
+    model_short, flavor = HF_TO_DRAFT[hf_model]
+    hf_key = DRAFT_ACC_MAP[(target, model_short, flavor)]
+    alpha_curve = ACC_CURVES[hf_key]
+    if args.optimal_K:
+        opt_K, accepted_per_verified, alpha = _find_optimal_K_cost(alpha_curve)
+    else:
+        opt_K = args.spec_len
+        alpha = alpha_curve.get(opt_K)
+        if alpha is None:
+            continue
+        accepted_per_verified = (opt_K * alpha + 1.0) / opt_K
+
     price_per_M = PRICE_OUT_PER_M[target]
-    tokens_per_dollar = acc * 1_000_000 / price_per_M
+    tokens_per_dollar = accepted_per_verified * 1_000_000 / price_per_M
     dollars_per_1k = 1000.0 / tokens_per_dollar
     rows.append({
         "target": target,
-        "model": model,
-        "accept": acc,
+        "model": hf_model,
+        "accept": alpha,
+        "optimal_K": int(opt_K),
         "price_per_M_output": price_per_M,
         "tokens_per_$": tokens_per_dollar,
         "$_per_1k_accepted": dollars_per_1k,
@@ -123,12 +209,23 @@ def _paper_rc():
 
 
 # -----------------------------
-# 5) Per-target bar charts
+# 5) Combined bar chart (two sub-figures, shared y-axis)
 # -----------------------------
-for target, g in df.groupby("target"):
-    _paper_rc()
+TARGET_ORDER = ["llama_target_70b", "qwen_target_32b"]
 
-    # Sort by acceptance rate (ascending) = natural model-size order
+_paper_rc()
+fig, axes = plt.subplots(
+    1, 2, figsize=FIG_BAR, dpi=FIG_DPI,
+    sharey=True,
+    constrained_layout=True,
+    gridspec_kw={"wspace": 0.02},
+)
+
+global_max = df["tokens_per_$"].max()
+
+for idx, target in enumerate(TARGET_ORDER):
+    ax = axes[idx]
+    g = df[df["target"] == target].copy()
     g = g.sort_values("accept", ascending=True).reset_index(drop=True)
 
     models = [MODEL_DISPLAY.get(m, m) for m in g["model"]]
@@ -140,8 +237,6 @@ for target, g in df.groupby("target"):
     n = len(models)
     x = np.arange(n)
 
-    fig, ax = plt.subplots(figsize=FIG_BAR, dpi=FIG_DPI)
-
     bars = ax.bar(
         x, values, width=0.55,
         color=[palette[i] for i in range(n)],
@@ -151,29 +246,20 @@ for target, g in df.groupby("target"):
     )
 
     # Value labels on top of each bar
-    y_pad = max(values) * 0.015
-    for bar, val, acc in zip(bars, values, accs):
+    y_pad = global_max * 0.015
+    for bar, val in zip(bars, values):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + y_pad,
-            f"{val / 1e3:.0f}K\n($\\alpha$={acc:.2f})",
+            f"{val / 1e3:.0f}K",
             ha="center", va="bottom", fontsize=8,
         )
 
-    ax.set_ylabel("Accepted Tokens per \\$")
-    ax.set_title(
-        f"Cost Efficiency of Draft Models  (Target: {display_name})", pad=10
-    )
+    if idx == 0:
+        ax.set_ylabel("Accepted Tokens per \\$")
+    ax.set_title(f"Target: {display_name}", pad=8)
     ax.set_xticks(x)
     ax.set_xticklabels(models, rotation=15, ha="right")
-
-    # Format y-axis in thousands
-    ax.yaxis.set_major_formatter(
-        plt.FuncFormatter(lambda v, _: f"{v / 1e3:.0f}K")
-    )
-
-    # Expand ylim to fit annotations
-    ax.set_ylim(0, max(values) * 1.28)
 
     # Light horizontal grid behind bars
     ax.grid(True, axis="y", linestyle="-", linewidth=0.4, alpha=0.35, zorder=0)
@@ -183,9 +269,18 @@ for target, g in df.groupby("target"):
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
 
-    fig.tight_layout()
-    fig.savefig(os.path.join(OUT_DIR, f"{target}_cost_efficiency.pdf"))
-    fig.savefig(os.path.join(OUT_DIR, f"{target}_cost_efficiency.png"))
-    plt.close(fig)
+# Shared y-axis formatting
+axes[0].yaxis.set_major_formatter(
+    plt.FuncFormatter(lambda v, _: f"{v / 1e3:.0f}K")
+)
+axes[0].set_ylim(0, global_max * 1.15)
+
+fig.suptitle(
+    f"Cost Efficiency of Draft Models  ({K_TITLE})",
+    fontsize=13, fontweight="bold", y=1.07,
+)
+fig.savefig(os.path.join(OUT_DIR, "cost_efficiency.pdf"))
+fig.savefig(os.path.join(OUT_DIR, "cost_efficiency.png"))
+plt.close(fig)
 
 print(f"Done. All outputs saved to {OUT_DIR}/")

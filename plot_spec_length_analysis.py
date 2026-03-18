@@ -37,7 +37,7 @@ TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 OUT_DIR = os.path.join("results", "spec_length_analysis", TIMESTAMP)
 os.makedirs(OUT_DIR, exist_ok=True)
 
-T_VERIFY_DEFAULT = 0.2          # seconds, used in goodput-vs-K plots
+T_VERIFY_DEFAULT = 0.5          # seconds, used in goodput-vs-K plots
 T_VERIFY_SWEEP = np.arange(0.05, 2.05, 0.05)  # for optimal-K analysis
 
 # ─────────────────────────────────────────────────────────
@@ -151,18 +151,30 @@ DEVICE_COLORS = {
 DEVICE_LSTYLES = {"RPi 4B": ":", "RPi 5": "--", "Jetson AGX Orin": "-"}
 
 
+# ── Central font-size configuration ──────────────────────
+# Edit ONLY here to control all font sizes across figures.
+FONT_CFG = {
+    "font_size":      15,   # base / fallback
+    "axes_label":     15,   # x / y axis labels
+    "axes_title":     18,   # subplot titles
+    "legend":         12,   # legend text
+    "tick_label":     15,   # tick labels
+    "suptitle":       20,   # figure-level suptitle
+}
+
+
 def _paper_rc():
     mpl.rcParams.update({
         "font.family":        "serif",
         "font.serif":         ["Times New Roman", "DejaVu Serif", "serif"],
         "mathtext.fontset":   "stix",
-        "font.size":          10,
-        "axes.labelsize":     12,
-        "axes.titlesize":     13,
+        "font.size":          FONT_CFG["font_size"],
+        "axes.labelsize":     FONT_CFG["axes_label"],
+        "axes.titlesize":     FONT_CFG["axes_title"],
         "axes.titleweight":   "bold",
-        "legend.fontsize":    9,
-        "xtick.labelsize":    10,
-        "ytick.labelsize":    10,
+        "legend.fontsize":    FONT_CFG["legend"],
+        "xtick.labelsize":    FONT_CFG["tick_label"],
+        "ytick.labelsize":    FONT_CFG["tick_label"],
         "xtick.direction":    "in",
         "ytick.direction":    "in",
         "xtick.major.width":  0.8,
@@ -285,7 +297,7 @@ def plot_tokens_per_round():
         ax.set_xticks(range(2, 11))
         ax.legend(
             loc="upper left", frameon=True, fancybox=False,
-            edgecolor="#cccccc", framealpha=0.95, fontsize=8,
+            edgecolor="#cccccc", framealpha=0.95,
         )
         _tidy(ax)
 
@@ -300,17 +312,19 @@ def plot_tokens_per_round():
 # ═════════════════════════════════════════════════════════
 def plot_goodput_vs_speclen(T_verify=T_VERIFY_DEFAULT):
     _paper_rc()
-    fig, axes = plt.subplots(
-        2, 3, figsize=(14.0, 7.0), dpi=FIG_DPI,
-        sharex=True,
-    )
+    tag = f"Tv{T_verify:.1f}s".replace(".", "p")
 
-    for row, (tk, td) in enumerate(TARGET_ORDER):
+    for tk, td in TARGET_ORDER:
+        fig, axes = plt.subplots(
+            1, 3, figsize=(14.0, 3.8), dpi=FIG_DPI,
+            sharex=True,
+        )
+
         palette = DRAFT_PALETTES[tk]
         sub = acc_df[acc_df["target_key"] == tk]
 
         for col, device in enumerate(DEVICE_ORDER):
-            ax = axes[row][col]
+            ax = axes[col]
 
             for i, draft in enumerate(DRAFT_ORDER[tk]):
                 g = sub[sub["draft_display"] == draft].sort_values("spec_len")
@@ -338,35 +352,28 @@ def plot_goodput_vs_speclen(T_verify=T_VERIFY_DEFAULT):
                 )
 
             ax.set_xticks(range(2, 11))
-            if row == 1:
-                ax.set_xlabel("Speculative Length  $K$")
+            ax.set_xlabel("Speculative Length  $K$")
             if col == 0:
                 ax.set_ylabel("Goodput  (tok/s)")
-            ax.set_title(f"{td} — {device}", pad=6, fontsize=11)
+            ax.set_title(f"{td} — {device}", pad=6)
             _tidy(ax)
 
-            if row == 0 and col == 2:
+            if col == 2:
                 ax.legend(
                     loc="best", frameon=True, fancybox=False,
-                    edgecolor="#cccccc", framealpha=0.95, fontsize=8,
-                )
-            if row == 1 and col == 2:
-                ax.legend(
-                    loc="best", frameon=True, fancybox=False,
-                    edgecolor="#cccccc", framealpha=0.95, fontsize=8,
+                    edgecolor="#cccccc", framealpha=0.95,
                 )
 
-    fig.suptitle(
-        f"Goodput vs Speculative Length  "
-        f"($T_{{\\mathrm{{verify}}}}$ = {T_verify}s, "
-        f"$\\bigstar$ = optimal $K$)",
-        fontsize=14, fontweight="bold", y=1.01,
-    )
-    fig.tight_layout()
-    tag = f"Tv{T_verify:.1f}s".replace(".", "p")
-    fig.savefig(os.path.join(OUT_DIR, f"goodput_vs_speclen_{tag}.pdf"))
-    fig.savefig(os.path.join(OUT_DIR, f"goodput_vs_speclen_{tag}.png"))
-    plt.close(fig)
+        fig.suptitle(
+            f"Goodput vs Speculative Length  "
+            f"($T_{{\\mathrm{{verify}}}}$ = {T_verify}s, "
+            f"$\\bigstar$ = optimal $K$)",
+            fontsize=FONT_CFG["suptitle"], fontweight="bold", y=1.01,
+        )
+        fig.tight_layout()
+        fig.savefig(os.path.join(OUT_DIR, f"goodput_vs_speclen_{tk}_{tag}.pdf"))
+        fig.savefig(os.path.join(OUT_DIR, f"goodput_vs_speclen_{tk}_{tag}.png"))
+        plt.close(fig)
 
 
 # ═════════════════════════════════════════════════════════
@@ -405,23 +412,23 @@ def plot_optimal_K():
                 ax.set_xlabel("Verification Latency  $T_{\\mathrm{verify}}$  (s)")
             if col == 0:
                 ax.set_ylabel("Optimal $K^*$")
-            ax.set_title(f"{td} — {device}", pad=6, fontsize=11)
+            ax.set_title(f"{td} — {device}", pad=6)
             _tidy(ax)
 
             if row == 0 and col == 0:
                 ax.legend(
                     loc="lower right", frameon=True, fancybox=False,
-                    edgecolor="#cccccc", framealpha=0.95, fontsize=8,
+                    edgecolor="#cccccc", framealpha=0.95,
                 )
             if row == 1 and col == 0:
                 ax.legend(
                     loc="lower right", frameon=True, fancybox=False,
-                    edgecolor="#cccccc", framealpha=0.95, fontsize=8,
+                    edgecolor="#cccccc", framealpha=0.95,
                 )
 
     fig.suptitle(
         "Optimal Speculative Length $K^*$ vs Verification Latency",
-        fontsize=14, fontweight="bold", y=1.01,
+        fontsize=FONT_CFG["suptitle"], fontweight="bold", y=1.01,
     )
     fig.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "optimal_speclen_vs_Tverify.pdf"))
